@@ -27,6 +27,7 @@ class FirstPageResponse(BaseModel):
     products: list[ScrapedProduct]
     suggestions: list[str]
     test_screenshot: str | None = None
+    debug: dict | None = None
 
 
 class ProductRequest(BaseModel):
@@ -46,6 +47,7 @@ async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
         products=[ScrapedProduct(**p) for p in products],
         suggestions=result.get("suggestions", []),
         test_screenshot=result.get("test_screenshot"),
+        debug=result.get("_debug"),
     )
 
 

@@ -236,6 +236,14 @@ export default function Testing() {
         {scraperError && <Typography color="error" variant="body2" mb={1}>Fehler: {scraperError}</Typography>}
         {scraperResult && (
           <Box>
+            {(scraperResult as any).debug && (
+              <Box sx={{ mb: 1.5, p: 1.5, bgcolor: "action.hover", borderRadius: 1, fontSize: "0.78rem", fontFamily: "monospace" }}>
+                <Typography variant="caption" fontWeight={700} display="block" mb={0.5}>Debug</Typography>
+                <Box>Proxy: <strong>{(scraperResult as any).debug.proxy}</strong></Box>
+                <Box>Attempts: <strong>{(scraperResult as any).debug.attempts}</strong></Box>
+                <Box sx={{ wordBreak: "break-all" }}>UA: {(scraperResult as any).debug.user_agent}</Box>
+              </Box>
+            )}
             <JsonBox data={scraperResult} />
             {(scraperResult as any).test_screenshot && (
               <Box mt={2}>

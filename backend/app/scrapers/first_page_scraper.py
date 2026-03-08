@@ -40,6 +40,7 @@ class FirstPageScraper:
             try:
                 result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot)
                 if result is not None:
+                    result["_debug"] = {**result.get("_debug", {}), "attempts": attempt + 1}
                     return result
                 logger.warning(f"[FP] No products on attempt {attempt + 1}")
             except Exception as e:
@@ -64,8 +65,9 @@ class FirstPageScraper:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
         proxy = get_proxy()
+        proxy_server = proxy["server"] if proxy else None
         if proxy:
-            logger.info(f"[FP] Using proxy: {proxy['server']}")
+            logger.info(f"[FP] Using proxy: {proxy_server}")
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=self.headless,
@@ -144,7 +146,15 @@ class FirstPageScraper:
                     return None
 
                 logger.info(f"[FP] Extracted {len(products)} products, {len(suggestions)} suggestions for '{keyword}'")
-                result: dict = {"products": products, "suggestions": suggestions}
+                result: dict = {
+                    "products": products,
+                    "suggestions": suggestions,
+                    "_debug": {
+                        "proxy": proxy_server or "none (direct)",
+                        "user_agent": user_agent,
+                        "attempt": attempt,
+                    },
+                }
                 if ts_filename:
                     result["test_screenshot"] = ts_filename
                 return result
