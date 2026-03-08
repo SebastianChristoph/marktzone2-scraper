@@ -111,7 +111,7 @@ async def _scrape_first_page(job: dict, market_name: str) -> dict:
     return {
         "market_name": market_name,
         "suggestions": suggestions,
-        "asins": [{"name": p.get("title") or p["asin"], "asin": p["asin"]} for p in products],
+        "asins": [{"name": p["asin"], "asin": p["asin"]} for p in products],
     }
 
 

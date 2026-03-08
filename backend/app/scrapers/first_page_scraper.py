@@ -138,9 +138,9 @@ class FirstPageScraper:
                 if test_screenshot:
                     ts_filename = self._take_test_screenshot(page, keyword)
 
-                products = self._extract_products_sync(page, keyword, job_id, attempt, url)
+                asins = self._extract_products_sync(page, keyword, job_id, attempt, url)
 
-                if not products:
+                if not asins:
                     screenshot = self._take_screenshot(page, keyword, "no_products")
                     log_error(
                         scraper_type="first_page",
@@ -154,9 +154,9 @@ class FirstPageScraper:
                     )
                     return None
 
-                logger.info(f"[FP] Extracted {len(products)} products, {len(suggestions)} suggestions for '{keyword}'")
+                logger.info(f"[FP] Extracted {len(asins)} ASINs, {len(suggestions)} suggestions for '{keyword}'")
                 result: dict = {
-                    "products": products,
+                    "products": asins,
                     "suggestions": suggestions,
                     "_debug": {
                         "proxy": proxy_server or "none (direct)",
@@ -284,7 +284,7 @@ class FirstPageScraper:
             return []
 
         items = page.query_selector_all("[data-asin]")
-        products = []
+        asins = []
         seen: set[str] = set()
 
         for item in items:
@@ -292,52 +292,9 @@ class FirstPageScraper:
             if not asin or asin in seen:
                 continue
             seen.add(asin)
+            asins.append({"asin": asin})
 
-            title = self._extract_title_sync(item)
-            if not title:
-                continue
-
-            price = self._extract_price_sync(item)
-            image = self._extract_image_sync(item)
-
-            products.append({"asin": asin, "title": title, "price": price, "image": image})
-
-        return products
-
-    def _extract_title_sync(self, item) -> Optional[str]:
-        for sel in ["h2 span", "span.a-text-normal", "h2"]:
-            try:
-                el = item.query_selector(sel)
-                if el:
-                    text = el.inner_text().strip()
-                    if text:
-                        return text
-            except Exception:
-                continue
-        return None
-
-    def _extract_price_sync(self, item) -> Optional[float]:
-        try:
-            el = item.query_selector("span.a-price span.a-offscreen")
-            if el:
-                text = el.inner_text().strip()
-                nums = re.findall(r"\d+", text.replace(",", ""))
-                if len(nums) >= 2:
-                    return float(f"{nums[0]}.{nums[1]}")
-                if len(nums) == 1:
-                    return float(nums[0])
-        except Exception:
-            pass
-        return None
-
-    def _extract_image_sync(self, item) -> Optional[str]:
-        try:
-            el = item.query_selector("img.s-image")
-            if el:
-                return el.get_attribute("src")
-        except Exception:
-            pass
-        return None
+        return asins
 
     def _take_test_screenshot(self, page: Page, keyword: str) -> Optional[str]:
         try:

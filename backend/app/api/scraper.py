@@ -16,9 +16,6 @@ class FirstPageRequest(BaseModel):
 
 class ScrapedProduct(BaseModel):
     asin: str
-    title: str
-    price: float | None
-    image: str | None
 
 
 class FirstPageResponse(BaseModel):
