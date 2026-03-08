@@ -3,12 +3,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.scrapers.first_page_scraper import FirstPageScraper
 from app.scrapers.product_scraper import ProductScraper
 from app.db.job_store import save_job, load_all_jobs, delete_job, delete_completed_jobs
+from app.api.security import require_scraper_secret
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ async def list_jobs() -> list[JobResponse]:
     ]
 
 
-@router.post("", response_model=JobResponse, status_code=202)
+@router.post("", response_model=JobResponse, status_code=202, dependencies=[Depends(require_scraper_secret)])
 async def create_job(request: CreateJobRequest, background_tasks: BackgroundTasks) -> JobResponse:
     job_id = str(uuid.uuid4())
     n = len(request.markets)
@@ -281,7 +282,7 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
     return _to_response(job)
 
 
-@router.post("/asin-scrape", response_model=JobResponse, status_code=202)
+@router.post("/asin-scrape", response_model=JobResponse, status_code=202, dependencies=[Depends(require_scraper_secret)])
 async def create_asin_job(request: CreateAsinJobRequest, background_tasks: BackgroundTasks) -> JobResponse:
     """ASIN-based clusters: skip first-page scraping, go straight to detail scraping."""
     job_id = str(uuid.uuid4())
@@ -321,6 +322,6 @@ async def delete_one_job(job_id: str) -> dict:
     return {"deleted": job_id}
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", response_model=JobResponse, dependencies=[Depends(require_scraper_secret)])
 async def get_job(job_id: str) -> JobResponse:
     return _to_response(_get_or_404(job_id))
