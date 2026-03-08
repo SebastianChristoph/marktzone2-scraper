@@ -59,7 +59,16 @@ class FirstPageScraper:
                 backoff = RETRY_BACKOFFS[attempt] if attempt < len(RETRY_BACKOFFS) else 60
                 logger.info(f"[FP] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
-        return {"products": [], "suggestions": []}
+        proxy = get_proxy()
+        return {
+            "products": [],
+            "suggestions": [],
+            "_debug": {
+                "proxy": proxy["server"] if proxy else "none (direct)",
+                "attempts": max_retries,
+                "user_agent": "n/a (all retries failed)",
+            },
+        }
 
     def _scrape_once_sync(self, keyword: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
