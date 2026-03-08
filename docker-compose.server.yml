@@ -1,0 +1,40 @@
+# Server / production docker-compose.
+# Uses PostgreSQL for all persistent data (no local SQLite volumes needed).
+# Usage: docker compose -f docker-compose.server.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scraper
+      POSTGRES_USER: scraper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://scraper:${POSTGRES_PASSWORD}@postgres:5432/scraper
+      - SCRAPER_DATA_DIR=/app/data
+    volumes:
+      - ./data/screenshots:/app/data/screenshots
+    depends_on:
+      - postgres
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
