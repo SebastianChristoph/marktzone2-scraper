@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app.scrapers.first_page_scraper import FirstPageScraper
 from app.scrapers.product_scraper import ProductScraper
+from app.db.paths import SCREENSHOTS_DIR
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
@@ -29,6 +30,7 @@ class FirstPageResponse(BaseModel):
 class ProductRequest(BaseModel):
     asin: str
     headless: bool = True
+    test_screenshot: bool = False
 
 
 @router.post("/first-page", response_model=FirstPageResponse)
@@ -47,7 +49,19 @@ async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
 @router.post("/product")
 async def scrape_product(request: ProductRequest):
     scraper = ProductScraper(headless=request.headless)
-    result = await scraper.scrape(request.asin)
+    result = await scraper.scrape(request.asin, test_screenshot=request.test_screenshot)
     if result is None:
         return {"asin": request.asin, "error": "scrape_failed"}
     return result
+
+
+@router.delete("/test-screenshots")
+async def delete_test_screenshots() -> dict:
+    deleted = 0
+    for f in SCREENSHOTS_DIR.glob("test_*.png"):
+        try:
+            f.unlink()
+            deleted += 1
+        except Exception:
+            pass
+    return {"deleted": deleted}

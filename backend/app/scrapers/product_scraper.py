@@ -28,14 +28,14 @@ class ProductScraper:
     def __init__(self, headless: bool = True):
         self.headless = headless
 
-    async def scrape(self, asin: str, job_id: Optional[str] = None) -> Optional[dict]:
-        return await asyncio.to_thread(self._scrape_sync, asin, job_id)
+    async def scrape(self, asin: str, job_id: Optional[str] = None, test_screenshot: bool = False) -> Optional[dict]:
+        return await asyncio.to_thread(self._scrape_sync, asin, job_id, test_screenshot)
 
-    def _scrape_sync(self, asin: str, job_id: Optional[str]) -> Optional[dict]:
+    def _scrape_sync(self, asin: str, job_id: Optional[str], test_screenshot: bool = False) -> Optional[dict]:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                result = self._scrape_once_sync(asin, job_id, attempt + 1)
+                result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot)
                 if result:
                     return result
                 logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
@@ -57,7 +57,7 @@ class ProductScraper:
                 time.sleep(backoff)
         return None
 
-    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int) -> Optional[dict]:
+    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/dp/{asin}?language=en_US"
 
@@ -95,6 +95,10 @@ class ProductScraper:
                 time.sleep(random.uniform(1.0, 2.0))
 
                 self._handle_continue_shopping(page)
+
+                test_screenshot_file: Optional[str] = None
+                if test_screenshot:
+                    test_screenshot_file = self._take_test_screenshot(page, asin)
 
                 if self._is_captcha(page):
                     screenshot = self._take_screenshot(page, asin, "captcha")
@@ -177,7 +181,7 @@ class ProductScraper:
 
                 total_revenue = round(blm * price, 2) if blm and price else None
 
-                return {
+                result = {
                     "asin": asin,
                     "title": title,
                     "price": price,
@@ -195,6 +199,9 @@ class ProductScraper:
                     "variants": variants,
                     "variants_count": len(variants) if variants else 0,
                 }
+                if test_screenshot_file:
+                    result["test_screenshot"] = test_screenshot_file
+                return result
             finally:
                 context.close()
                 browser.close()
@@ -210,6 +217,18 @@ class ProductScraper:
             return filename
         except Exception as e:
             logger.warning(f"[PS] Screenshot failed: {e}")
+            return None
+
+    def _take_test_screenshot(self, page: Page, asin: str) -> Optional[str]:
+        try:
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            filename = f"test_{asin}_{ts}.png"
+            page.screenshot(path=str(SCREENSHOTS_DIR / filename), full_page=False)
+            logger.info(f"[PS] Test screenshot saved: {filename}")
+            return filename
+        except Exception as e:
+            logger.warning(f"[PS] Test screenshot failed: {e}")
             return None
 
     def _handle_continue_shopping(self, page: Page):

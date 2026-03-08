@@ -44,6 +44,17 @@ export default function Testing() {
   const [productLoading, setProductLoading] = useState(false);
   const [productResult, setProductResult] = useState<unknown>(null);
   const [productError, setProductError] = useState<string | null>(null);
+  const [deletingScreenshots, setDeletingScreenshots] = useState(false);
+
+  async function handleDeleteTestScreenshots() {
+    setDeletingScreenshots(true);
+    try {
+      await fetch("/api/scraper/test-screenshots", { method: "DELETE" });
+      setProductResult(null);
+    } finally {
+      setDeletingScreenshots(false);
+    }
+  }
 
   async function handleProductScrape() {
     if (!productAsin.trim()) return;
@@ -54,7 +65,7 @@ export default function Testing() {
       const res = await fetch("/api/scraper/product", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asin: productAsin.trim(), headless: productHeadless }),
+        body: JSON.stringify({ asin: productAsin.trim(), headless: productHeadless, test_screenshot: true }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setProductResult(await res.json());
@@ -263,7 +274,34 @@ export default function Testing() {
           />
         )}
         {productError && <Typography color="error" variant="body2" mb={1}>Fehler: {productError}</Typography>}
-        {productResult && <JsonBox data={productResult} />}
+        {productResult && (
+          <Box>
+            <JsonBox data={productResult} />
+            {(productResult as any).test_screenshot && (
+              <Box mt={2}>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                  Screenshot (product page at scrape time):
+                </Typography>
+                <img
+                  src={`/api/static/screenshots/${(productResult as any).test_screenshot}`}
+                  alt="test screenshot"
+                  style={{ maxWidth: "100%", borderRadius: 4, border: "1px solid #ddd" }}
+                />
+              </Box>
+            )}
+            <Box mt={1.5}>
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                disabled={deletingScreenshots}
+                onClick={handleDeleteTestScreenshots}
+              >
+                {deletingScreenshots ? "Deleting…" : "Delete test screenshots"}
+              </Button>
+            </Box>
+          </Box>
+        )}
       </Paper>
 
       {/* Real cluster job */}
