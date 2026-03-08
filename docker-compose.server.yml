@@ -3,6 +3,20 @@
 # Usage: docker compose -f docker-compose.server.yml up -d
 
 services:
+  traefik:
+    image: traefik:v3.3
+    container_name: scraper-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/static.yaml:/etc/traefik/traefik.yaml:ro
+      - ./traefik/acme:/acme
+    networks:
+      - scraper_net
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -12,6 +26,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - scraper_net
 
   backend:
     build: ./backend
@@ -27,14 +43,26 @@ services:
       - ./data/screenshots:/app/data/screenshots
     depends_on:
       - postgres
+    networks:
+      - scraper_net
 
   frontend:
     build: ./frontend
     restart: unless-stopped
-    ports:
-      - "5174:80"
     depends_on:
       - backend
+    networks:
+      - scraper_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.scraper-ui.rule=Host(`scraper.marktzone.io`)"
+      - "traefik.http.routers.scraper-ui.entrypoints=websecure"
+      - "traefik.http.routers.scraper-ui.tls.certresolver=letsencrypt"
+      - "traefik.http.services.scraper-ui.loadbalancer.server.port=80"
+
+networks:
+  scraper_net:
+    driver: bridge
 
 volumes:
   postgres_data:
