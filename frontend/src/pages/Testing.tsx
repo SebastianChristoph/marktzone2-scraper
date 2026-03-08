@@ -85,7 +85,7 @@ export default function Testing() {
       const res = await fetch("/api/scraper/first-page", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: scraperKeyword.trim(), headless: scraperHeadless }),
+        body: JSON.stringify({ keyword: scraperKeyword.trim(), headless: scraperHeadless, test_screenshot: true }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setScraperResult(await res.json());
@@ -234,7 +234,29 @@ export default function Testing() {
           />
         )}
         {scraperError && <Typography color="error" variant="body2" mb={1}>Fehler: {scraperError}</Typography>}
-        {scraperResult && <JsonBox data={scraperResult} />}
+        {scraperResult && (
+          <Box>
+            <JsonBox data={scraperResult} />
+            {(scraperResult as any).test_screenshot && (
+              <Box mt={2}>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                  Screenshot (search results page at scrape time):
+                </Typography>
+                <a
+                  href={`/api/static/screenshots/${(scraperResult as any).test_screenshot}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src={`/api/static/screenshots/${(scraperResult as any).test_screenshot}`}
+                    alt="test screenshot"
+                    style={{ maxWidth: "100%", borderRadius: 4, border: "1px solid #ddd", cursor: "zoom-in", display: "block" }}
+                  />
+                </a>
+              </Box>
+            )}
+          </Box>
+        )}
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
@@ -282,11 +304,17 @@ export default function Testing() {
                 <Typography variant="caption" color="text.secondary" display="block" mb={1}>
                   Screenshot (product page at scrape time):
                 </Typography>
-                <img
-                  src={`/api/static/screenshots/${(productResult as any).test_screenshot}`}
-                  alt="test screenshot"
-                  style={{ maxWidth: "100%", borderRadius: 4, border: "1px solid #ddd" }}
-                />
+                <a
+                  href={`/api/static/screenshots/${(productResult as any).test_screenshot}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src={`/api/static/screenshots/${(productResult as any).test_screenshot}`}
+                    alt="test screenshot"
+                    style={{ maxWidth: "100%", borderRadius: 4, border: "1px solid #ddd", cursor: "zoom-in", display: "block" }}
+                  />
+                </a>
               </Box>
             )}
             <Box mt={1.5}>

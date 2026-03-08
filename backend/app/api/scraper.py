@@ -11,6 +11,7 @@ router = APIRouter(prefix="/scraper", tags=["scraper"])
 class FirstPageRequest(BaseModel):
     keyword: str
     headless: bool = True
+    test_screenshot: bool = False
 
 
 class ScrapedProduct(BaseModel):
@@ -25,6 +26,7 @@ class FirstPageResponse(BaseModel):
     count: int
     products: list[ScrapedProduct]
     suggestions: list[str]
+    test_screenshot: str | None = None
 
 
 class ProductRequest(BaseModel):
@@ -36,13 +38,14 @@ class ProductRequest(BaseModel):
 @router.post("/first-page", response_model=FirstPageResponse)
 async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
     scraper = FirstPageScraper(headless=request.headless)
-    result = await scraper.scrape(request.keyword)
+    result = await scraper.scrape(request.keyword, test_screenshot=request.test_screenshot)
     products = result.get("products", [])
     return FirstPageResponse(
         keyword=request.keyword,
         count=len(products),
         products=[ScrapedProduct(**p) for p in products],
         suggestions=result.get("suggestions", []),
+        test_screenshot=result.get("test_screenshot"),
     )
 
 

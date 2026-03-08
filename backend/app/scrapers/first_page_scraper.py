@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright, Page
 
 from app.db.error_log import log_error
 from app.db.paths import SCREENSHOTS_DIR
+from app.scrapers.proxy_manager import get_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,14 @@ class FirstPageScraper:
     def __init__(self, headless: bool = True):
         self.headless = headless
 
-    async def scrape(self, keyword: str, job_id: Optional[str] = None) -> dict:
-        return await asyncio.to_thread(self._scrape_sync, keyword, job_id)
+    async def scrape(self, keyword: str, job_id: Optional[str] = None, test_screenshot: bool = False) -> dict:
+        return await asyncio.to_thread(self._scrape_sync, keyword, job_id, test_screenshot)
 
-    def _scrape_sync(self, keyword: str, job_id: Optional[str]) -> dict:
+    def _scrape_sync(self, keyword: str, job_id: Optional[str], test_screenshot: bool = False) -> dict:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                result = self._scrape_once_sync(keyword, job_id, attempt + 1)
+                result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot)
                 if result is not None:
                     return result
                 logger.warning(f"[FP] No products on attempt {attempt + 1}")
@@ -59,9 +60,12 @@ class FirstPageScraper:
                 time.sleep(backoff)
         return {"products": [], "suggestions": []}
 
-    def _scrape_once_sync(self, keyword: str, job_id: Optional[str], attempt: int) -> Optional[dict]:
+    def _scrape_once_sync(self, keyword: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
+        proxy = get_proxy()
+        if proxy:
+            logger.info(f"[FP] Using proxy: {proxy['server']}")
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=self.headless,
@@ -84,6 +88,7 @@ class FirstPageScraper:
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                     "sec-ch-ua-platform": '"Windows"',
                 },
+                **({"proxy": proxy} if proxy else {}),
             )
             # Hide navigator.webdriver
             context.add_init_script("""
@@ -117,6 +122,11 @@ class FirstPageScraper:
                     raise RuntimeError("CAPTCHA or bot check detected")
 
                 self._scroll_sync(page)
+
+                ts_filename = None
+                if test_screenshot:
+                    ts_filename = self._take_test_screenshot(page, keyword)
+
                 products = self._extract_products_sync(page, keyword, job_id, attempt, url)
 
                 if not products:
@@ -134,7 +144,10 @@ class FirstPageScraper:
                     return None
 
                 logger.info(f"[FP] Extracted {len(products)} products, {len(suggestions)} suggestions for '{keyword}'")
-                return {"products": products, "suggestions": suggestions}
+                result: dict = {"products": products, "suggestions": suggestions}
+                if ts_filename:
+                    result["test_screenshot"] = ts_filename
+                return result
             finally:
                 context.close()
                 browser.close()
@@ -306,6 +319,19 @@ class FirstPageScraper:
         except Exception:
             pass
         return None
+
+    def _take_test_screenshot(self, page: Page, keyword: str) -> Optional[str]:
+        try:
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            safe_kw = re.sub(r"[^\w\-]", "_", keyword)[:40]
+            filename = f"test_fp_{safe_kw}_{ts}.png"
+            page.screenshot(path=str(SCREENSHOTS_DIR / filename), full_page=False)
+            logger.info(f"[FP] Test screenshot saved: {filename}")
+            return filename
+        except Exception as e:
+            logger.warning(f"[FP] Test screenshot failed: {e}")
+            return None
 
     def _take_screenshot(self, page: Page, context: str, error_type: str) -> Optional[str]:
         try:
