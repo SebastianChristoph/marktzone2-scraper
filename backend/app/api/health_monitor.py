@@ -21,7 +21,7 @@ router = APIRouter(prefix="/health-monitor", tags=["health-monitor"])
 logger = logging.getLogger(__name__)
 
 _CHECK_INTERVAL_S = 5 * 3600  # 5 hours
-_PRODUCT_REQUIRED_FIELDS = ["title", "price", "main_category_rank", "ratings_count", "avg_rating"]
+_PRODUCT_REQUIRED_FIELDS = ["title", "price", "main_category_rank", "ratings", "avg_rating"]
 _MIN_FIRST_PAGE_ASINS = 5
 
 _SEM = asyncio.Semaphore(2)  # health checks don't need full 4 slots
@@ -61,7 +61,7 @@ async def _check_asin(asin: str) -> dict:
             scraper = ProductScraper(headless=True)
             raw = await scraper.scrape(asin)
         if raw:
-            missing = [f for f in _PRODUCT_REQUIRED_FIELDS if not raw.get(f)]
+            missing = [f for f in _PRODUCT_REQUIRED_FIELDS if raw.get(f) is None]
             result["missing_fields"] = missing
             result["ok"] = len(missing) == 0
             result["data"] = {f: raw.get(f) for f in _PRODUCT_REQUIRED_FIELDS}
