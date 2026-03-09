@@ -115,7 +115,21 @@ class FirstPageScraper:
                 suggestions = self._get_suggestions_sync(page, keyword)
 
                 logger.info(f"[FP] GET {url}")
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                except Exception as goto_err:
+                    screenshot = self._take_screenshot(page, keyword, "timeout")
+                    log_error(
+                        scraper_type="first_page",
+                        context=keyword,
+                        error_type="timeout",
+                        error_message=str(goto_err),
+                        url=url,
+                        job_id=job_id,
+                        attempt=attempt,
+                        screenshot_file=screenshot,
+                    )
+                    raise
                 time.sleep(random.uniform(1.0, 2.0))
 
                 if self._is_captcha_sync(page):
