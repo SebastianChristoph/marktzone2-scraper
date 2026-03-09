@@ -23,6 +23,22 @@ interface TimingStats {
   max: number | null;
 }
 
+interface DailySessionRow {
+  session_id: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  phase: string;
+  markets_done: number;
+  markets_errors: number;
+  asins_done: number;
+  asins_errors: number;
+  products_updated: number;
+  products_new: number;
+  markets_changed: number;
+  total_duration_s: number | null;
+}
+
 interface Stats {
   summary: {
     total_jobs: number;
@@ -129,14 +145,22 @@ function MiniBarChart({ data, dateMode = false }: {
 
 export default function Statistics() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [dailyHistory, setDailyHistory] = useState<DailySessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     try {
-      const res = await fetch("/api/stats");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setStats(await res.json());
+      const [statsRes, dailyRes] = await Promise.all([
+        fetch("/api/stats"),
+        fetch("/api/daily/history"),
+      ]);
+      if (!statsRes.ok) throw new Error(`HTTP ${statsRes.status}`);
+      setStats(await statsRes.json());
+      if (dailyRes.ok) {
+        const d = await dailyRes.json();
+        setDailyHistory(d.sessions ?? []);
+      }
       setError(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Fehler beim Laden");
@@ -312,6 +336,88 @@ export default function Statistics() {
           )}
         </Paper>
       </Box>
+
+      {/* ── Daily Scraper ──────────────────────────────────────────────── */}
+      <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>
+        Daily Scraper — Historie
+      </Typography>
+      <Divider sx={{ mt: 0.5, mb: 2 }} />
+
+      {dailyHistory.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" mb={4}>
+          Noch keine Daily-Runs — erster Start täglich um 00:05 UTC.
+        </Typography>
+      ) : (
+        <>
+          {/* Summary from last run */}
+          {(() => {
+            const last = dailyHistory[0];
+            return (
+              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 3 }}>
+                <StatCard
+                  label="Letzter Run"
+                  value={last.started_at.slice(0, 10)}
+                  sub={last.status}
+                  color={last.status === "completed" ? "success.main" : last.status === "failed" ? "error.main" : undefined}
+                />
+                <StatCard label="Dauer" value={fmt(last.total_duration_s)} sub="Gesamt-Laufzeit" />
+                <StatCard label="ASINs gescraped" value={(last.asins_done ?? 0).toLocaleString()} />
+                <StatCard label="Products updated" value={last.products_updated} sub="neue ProductChanges" />
+                <StatCard label="Neue Products" value={last.products_new} color={last.products_new > 0 ? "success.main" : undefined} />
+                <StatCard label="MarketChanges" value={last.markets_changed} />
+                <StatCard
+                  label="Fehler"
+                  value={(last.markets_errors ?? 0) + (last.asins_errors ?? 0)}
+                  color={((last.markets_errors ?? 0) + (last.asins_errors ?? 0)) > 0 ? "warning.main" : undefined}
+                />
+              </Box>
+            );
+          })()}
+
+          {/* History table */}
+          <Paper variant="outlined" sx={{ mb: 4 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700 }}>Datum</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Dauer</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>ASINs</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Updated</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Neu</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>MarketChanges</TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: "warning.main" }}>Fehler</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {dailyHistory.slice(0, 10).map((s) => {
+                  const errors = (s.markets_errors ?? 0) + (s.asins_errors ?? 0);
+                  return (
+                    <TableRow key={s.session_id}>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                        {s.started_at.slice(0, 16).replace("T", " ")}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={s.status}
+                          size="small"
+                          color={s.status === "completed" ? "success" : s.status === "failed" ? "error" : "warning"}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{fmt(s.total_duration_s)}</TableCell>
+                      <TableCell sx={{ fontSize: "0.8rem" }}>{(s.asins_done ?? 0).toLocaleString()}</TableCell>
+                      <TableCell sx={{ fontSize: "0.8rem" }}>{s.products_updated}</TableCell>
+                      <TableCell sx={{ fontSize: "0.8rem", color: s.products_new > 0 ? "success.main" : undefined }}>{s.products_new}</TableCell>
+                      <TableCell sx={{ fontSize: "0.8rem" }}>{s.markets_changed}</TableCell>
+                      <TableCell sx={{ fontSize: "0.8rem", color: errors > 0 ? "warning.main" : "text.disabled" }}>{errors || "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Paper>
+        </>
+      )}
 
       {/* ── Top Clusters ───────────────────────────────────────────────── */}
       <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>

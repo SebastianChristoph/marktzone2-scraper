@@ -1,0 +1,14 @@
+Der daily_scraper hat die Aufgabe, alle MarketCluster,Markets nd Products zu scrapen nd aktualisieren. Er wird gesteuert von der marktzone-app, die scraper-app gibt lediglich immer die Responses und orchestriert die Parallelität.
+Der Ablauf sollte folgendermaßen sein.
+
+1.) Check auf Updates in allen Markets: da die Markets keinem speziellen User gehören, können Markets für dynamic cluster genutzt werden. Hierzu ist es wichtig, dass der daily_scraper als erstes analysiert, ob es neue Produkte im Market gibt (first page scraping). Falls ja, werden diese als neues product (inkl ProductChange) in die Datenbank geschrieben und mit dem Market verlinkt. 
+
+2.) Scraping aller Products: Es werden nach und nach alle Products gescrapet und geprüft: unterscheiden sich de Product-Daten zu den aktuellen Product-Daten? wenn ja, wird ein ProductChange erstellt . Die Datenbank kann 100.000 ASINs beinhalten, hier muss fast zwingend parallel gearbeitet werden (oder?)
+
+3.) Market-Updates: nachdem alle Products gescrapet wurden, muss geprüft werden, ob es im Market bzw in den aggegrierten prdocuts darin Updates gab (neues total Revenue etc), falls ja, wird ein MarketChange erstellt.
+
+4.) Danach müssen alle MarketCluster ge-updatet weren (hier Obacht auf den cluster_type), da sich darin ja höchstwahrscheinlich markets nd Products geupdatet haben
+
+Anmerkungen:
+- als Admin will ich natürlich wissen, wie mein daily scraper performt: wie lange dauert ein Product-Scraping,wie lange der daily_scraper,wieviel Products wurden geupdatet. Es gibt eine "statistics" seite auf der scraper-ui, hier soll es eine neue Sektion für den daily_scraper eben
+- es ist super wichtig, dass der daily-scraper nie komplett abbricht. Scraping ist Fehler-Anfällig, sollte ein Product/market mal nicht gescrapet werden können, lieber überspringen /failen und dann weiter machen. Es gibt ja die error_logs,die mir dann sagen, warum es fehlshclug.Bau also ein robustes Fehler-Handling ein

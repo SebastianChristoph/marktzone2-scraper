@@ -20,6 +20,112 @@ import {
   Typography,
 } from "@mui/material";
 
+interface DailySession {
+  session_id: string;
+  started_at: string;
+  status: string;
+  phase: string;
+  markets_total: number;
+  markets_done: number;
+  markets_errors: number;
+  asins_total: number;
+  asins_done: number;
+  asins_errors: number;
+  products_updated: number;
+  products_new: number;
+  markets_changed: number;
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  market_discovery: "Phase 1 — Market Discovery",
+  product_scraping: "Phase 2 — Product Scraping",
+  market_aggregation: "Phase 3 — Market Aggregation",
+  cluster_update: "Phase 4 — Cluster Update",
+  done: "Abgeschlossen",
+};
+
+function DailyRunCard({ session }: { session: DailySession }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = new Date(session.started_at).getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [session.started_at]);
+
+  const fmtTime = (s: number) =>
+    s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+
+  const isProductPhase = session.phase === "product_scraping";
+  const progressValue = isProductPhase && session.asins_total > 0
+    ? (session.asins_done / session.asins_total) * 100
+    : session.markets_total > 0
+    ? (session.markets_done / session.markets_total) * 100
+    : null;
+
+  const progressLabel = isProductPhase
+    ? `${session.asins_done} / ${session.asins_total} ASINs`
+    : `${session.markets_done} / ${session.markets_total} Markets`;
+
+  const errors = session.markets_errors + session.asins_errors;
+
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2.5, mb: 3,
+        borderColor: "primary.main",
+        borderWidth: 1.5,
+        bgcolor: "action.hover",
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5 }}>
+        <CircularProgress size={16} />
+        <Typography variant="subtitle2" fontWeight={700} color="primary.main">
+          Daily Scraper — läuft
+        </Typography>
+        <Chip
+          label={PHASE_LABELS[session.phase] ?? session.phase}
+          size="small"
+          color="primary"
+          variant="outlined"
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+          {fmtTime(elapsed)}
+        </Typography>
+      </Box>
+
+      <LinearProgress
+        variant={progressValue !== null ? "determinate" : "indeterminate"}
+        value={progressValue ?? 0}
+        sx={{ borderRadius: 1, mb: 1 }}
+      />
+
+      <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+        <Typography variant="caption" color="text.secondary">
+          {progressLabel}
+        </Typography>
+        {session.products_new > 0 && (
+          <Typography variant="caption" color="success.main">
+            +{session.products_new} neue Products
+          </Typography>
+        )}
+        {session.products_updated > 0 && (
+          <Typography variant="caption" color="info.main">
+            {session.products_updated} Updates
+          </Typography>
+        )}
+        {errors > 0 && (
+          <Typography variant="caption" color="warning.main">
+            {errors} Fehler
+          </Typography>
+        )}
+      </Box>
+    </Paper>
+  );
+}
+
 interface MarketResult {
   market_name: string;
   products: unknown[];
@@ -55,6 +161,7 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [detailJob, setDetailJob] = useState<Job | null>(null);
+  const [dailySession, setDailySession] = useState<DailySession | null>(null);
   const tickRef = useRef(0);
 
   async function fetchJobs() {
@@ -68,10 +175,23 @@ export default function Dashboard() {
     } catch { /* backend not ready yet */ }
   }
 
+  async function fetchDailyStatus() {
+    try {
+      const res = await fetch("/api/daily/status");
+      if (res.ok) {
+        const data = await res.json();
+        const s = data.session;
+        setDailySession(s?.status === "running" ? s : null);
+      }
+    } catch { /* non-critical */ }
+  }
+
   useEffect(() => {
     fetchJobs();
-    const id = setInterval(fetchJobs, 2000);
-    return () => clearInterval(id);
+    fetchDailyStatus();
+    const id1 = setInterval(fetchJobs, 2000);
+    const id2 = setInterval(fetchDailyStatus, 5000);
+    return () => { clearInterval(id1); clearInterval(id2); };
   }, []);
 
   async function deleteJob(jobId: string, e: React.MouseEvent) {
@@ -92,6 +212,9 @@ export default function Dashboard() {
 
   return (
     <Box>
+      {/* Daily scraper live progress (shown only when running) */}
+      {dailySession && <DailyRunCard session={dailySession} />}
+
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 4 }}>
         <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, ml: "auto" }}>
