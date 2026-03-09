@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright, Page, ElementHandle
 
 from app.db.error_log import log_error
 from app.db.paths import SCREENSHOTS_DIR
+from app.scrapers.proxy_manager import get_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class ProductScraper:
 
     def _scrape_sync(self, asin: str, job_id: Optional[str], test_screenshot: bool = False) -> Optional[dict]:
         max_retries = 3
+        last_error: Optional[str] = None
         for attempt in range(max_retries):
             try:
                 result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot)
@@ -40,26 +42,41 @@ class ProductScraper:
                     return result
                 logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
             except Exception as e:
+                last_error = str(e)
                 logger.error(f"[PS] Attempt {attempt + 1} failed for {asin}: {e}")
-                if attempt == max_retries - 1:
-                    log_error(
-                        scraper_type="product",
-                        context=asin,
-                        error_type="scrape_failed",
-                        error_message=f"All {max_retries} retries exhausted: {e}",
-                        url=f"https://www.amazon.com/dp/{asin}?language=en_US",
-                        job_id=job_id,
-                        attempt=attempt + 1,
-                    )
             if attempt < max_retries - 1:
                 backoff = RETRY_BACKOFFS[attempt] if attempt < len(RETRY_BACKOFFS) else 60
                 logger.info(f"[PS] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
+
+        # All direct attempts failed — try once more with proxy as fallback
+        logger.info(f"[PS] All {max_retries} direct attempts failed for {asin} — retrying with proxy")
+        try:
+            result = self._scrape_once_sync(asin, job_id, max_retries + 1, test_screenshot, use_proxy=True)
+            if result:
+                logger.info(f"[PS] Proxy fallback succeeded for {asin}")
+                return result
+        except Exception as e:
+            last_error = str(e)
+            logger.error(f"[PS] Proxy fallback also failed for {asin}: {e}")
+
+        log_error(
+            scraper_type="product",
+            context=asin,
+            error_type="scrape_failed",
+            error_message=f"All {max_retries} retries + proxy fallback exhausted: {last_error}",
+            url=f"https://www.amazon.com/dp/{asin}?language=en_US",
+            job_id=job_id,
+            attempt=max_retries + 1,
+        )
         return None
 
-    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False) -> Optional[dict]:
+    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False, use_proxy: bool = False) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/dp/{asin}?language=en_US"
+        proxy = get_proxy() if use_proxy else None
+        if proxy:
+            logger.info(f"[PS] Using proxy fallback for {asin}: {proxy['server']}")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -81,6 +98,7 @@ class ProductScraper:
                     "Accept-Language": "en-US,en;q=0.9",
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 },
+                **({"proxy": proxy} if proxy else {}),
             )
             context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
