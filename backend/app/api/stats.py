@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 
-from app.db.job_store import load_all_jobs
+from app.db.job_store import load_all_jobs, delete_all_jobs
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -30,6 +30,12 @@ def _timing_stats(values: list[float]) -> dict:
         "min": round(s[0], 2),
         "max": round(s[-1], 2),
     }
+
+
+@router.delete("")
+async def clear_stats() -> dict:
+    deleted = delete_all_jobs()
+    return {"deleted": deleted}
 
 
 @router.get("")

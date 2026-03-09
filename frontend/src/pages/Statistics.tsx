@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Box,
+  Button,
   Chip,
   CircularProgress,
   Divider,
@@ -148,6 +149,18 @@ export default function Statistics() {
   const [dailyHistory, setDailyHistory] = useState<DailySessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteAllStats() {
+    if (!confirm("Alle Statistiken (Jobs) löschen?")) return;
+    setDeleting(true);
+    try {
+      await fetch("/api/stats", { method: "DELETE" });
+      await load();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function load() {
     try {
@@ -198,10 +211,25 @@ export default function Statistics() {
   return (
     <Box>
       {/* Header */}
-      <Typography variant="h4" fontWeight={700} mb={1}>Statistiken</Typography>
-      <Typography variant="body2" color="text.secondary" mb={4}>
-        Performance-Metriken des Ad-hoc Scrapers — basierend auf {summary.total_jobs} gespeicherten Jobs
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2, mb: 1 }}>
+        <Box>
+          <Typography variant="h4" fontWeight={700}>Statistiken</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Performance-Metriken des Ad-hoc Scrapers — basierend auf {summary.total_jobs} gespeicherten Jobs
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          color="error"
+          size="small"
+          sx={{ ml: "auto", mt: 0.5, whiteSpace: "nowrap" }}
+          onClick={deleteAllStats}
+          disabled={deleting || summary.total_jobs === 0}
+        >
+          {deleting ? "Löschen…" : "Alle Statistiken löschen"}
+        </Button>
+      </Box>
+      <Box mb={4} />
 
       {/* ── Summary cards ──────────────────────────────────────────────── */}
       <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>

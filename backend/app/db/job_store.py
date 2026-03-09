@@ -85,3 +85,9 @@ def delete_completed_jobs() -> int:
     cur = _ex(f"DELETE FROM jobs WHERE status IN ({PH},{PH})", ("completed", "failed"))
     _commit()
     return cur.rowcount
+
+
+def delete_all_jobs() -> int:
+    cur = _ex("DELETE FROM jobs")
+    _commit()
+    return cur.rowcount
