@@ -12,6 +12,7 @@ class FirstPageRequest(BaseModel):
     keyword: str
     headless: bool = True
     test_screenshot: bool = False
+    country: str | None = None  # "us" | "de" | "fr" — Webshare country targeting
 
 
 class ScrapedProduct(BaseModel):
@@ -36,7 +37,7 @@ class ProductRequest(BaseModel):
 @router.post("/first-page", response_model=FirstPageResponse)
 async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
     scraper = FirstPageScraper(headless=request.headless)
-    result = await scraper.scrape(request.keyword, test_screenshot=request.test_screenshot)
+    result = await scraper.scrape(request.keyword, test_screenshot=request.test_screenshot, country=request.country)
     products = result.get("products", [])
     return FirstPageResponse(
         keyword=request.keyword,

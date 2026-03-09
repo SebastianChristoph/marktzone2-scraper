@@ -7,12 +7,15 @@ logger = logging.getLogger(__name__)
 
 # Set WEBSHARE_PROXY_URL=http://user:pass@host:port in .env
 _PROXY_URL = os.getenv("WEBSHARE_PROXY_URL", "")
-_proxy: Optional[dict] = None
+_parsed_base: Optional[object] = None
 _initialized = False
+
+# Webshare country code mapping
+COUNTRY_CODES = {"us": "us", "de": "de", "fr": "fr"}
 
 
 def _init() -> None:
-    global _proxy, _initialized
+    global _parsed_base, _initialized
     if _initialized:
         return
     _initialized = True
@@ -22,18 +25,26 @@ def _init() -> None:
         return
 
     try:
-        parsed = urlparse(_PROXY_URL)
-        _proxy = {
-            "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
-            "username": parsed.username,
-            "password": parsed.password,
-        }
-        logger.info(f"[Proxy] Configured proxy: {parsed.scheme}://{parsed.hostname}:{parsed.port} (user: {parsed.username})")
+        _parsed_base = urlparse(_PROXY_URL)
+        logger.info(f"[Proxy] Configured proxy: {_parsed_base.scheme}://{_parsed_base.hostname}:{_parsed_base.port} (user: {_parsed_base.username})")
     except Exception as e:
         logger.warning(f"[Proxy] Failed to parse WEBSHARE_PROXY_URL: {e} — running without proxy")
 
 
-def get_proxy() -> Optional[dict]:
-    """Return the Playwright proxy dict, or None if not configured."""
+def get_proxy(country: Optional[str] = None) -> Optional[dict]:
+    """Return the Playwright proxy dict, or None if not configured.
+    Pass country='us'/'de'/'fr' to target a specific country via Webshare username suffix.
+    """
     _init()
-    return _proxy
+    if _parsed_base is None:
+        return None
+
+    username = _parsed_base.username
+    if country and country.lower() in COUNTRY_CODES:
+        username = f"{username}-country-{COUNTRY_CODES[country.lower()]}"
+
+    return {
+        "server": f"{_parsed_base.scheme}://{_parsed_base.hostname}:{_parsed_base.port}",
+        "username": username,
+        "password": _parsed_base.password,
+    }

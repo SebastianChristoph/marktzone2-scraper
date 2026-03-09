@@ -31,14 +31,14 @@ class FirstPageScraper:
     def __init__(self, headless: bool = True):
         self.headless = headless
 
-    async def scrape(self, keyword: str, job_id: Optional[str] = None, test_screenshot: bool = False) -> dict:
-        return await asyncio.to_thread(self._scrape_sync, keyword, job_id, test_screenshot)
+    async def scrape(self, keyword: str, job_id: Optional[str] = None, test_screenshot: bool = False, country: Optional[str] = None) -> dict:
+        return await asyncio.to_thread(self._scrape_sync, keyword, job_id, test_screenshot, country)
 
-    def _scrape_sync(self, keyword: str, job_id: Optional[str], test_screenshot: bool = False) -> dict:
+    def _scrape_sync(self, keyword: str, job_id: Optional[str], test_screenshot: bool = False, country: Optional[str] = None) -> dict:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot)
+                result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot, country)
                 if result is not None:
                     result["_debug"] = {**result.get("_debug", {}), "attempts": attempt + 1}
                     return result
@@ -59,7 +59,7 @@ class FirstPageScraper:
                 backoff = RETRY_BACKOFFS[attempt] if attempt < len(RETRY_BACKOFFS) else 60
                 logger.info(f"[FP] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
-        proxy = get_proxy()
+        proxy = get_proxy(country)
         return {
             "products": [],
             "suggestions": [],
@@ -70,13 +70,13 @@ class FirstPageScraper:
             },
         }
 
-    def _scrape_once_sync(self, keyword: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False) -> Optional[dict]:
+    def _scrape_once_sync(self, keyword: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False, country: Optional[str] = None) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
-        proxy = get_proxy()
+        proxy = get_proxy(country)
         proxy_server = proxy["server"] if proxy else None
         if proxy:
-            logger.info(f"[FP] Using proxy: {proxy_server}")
+            logger.info(f"[FP] Using proxy: {proxy_server} (country={country or 'default'})")
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=self.headless,

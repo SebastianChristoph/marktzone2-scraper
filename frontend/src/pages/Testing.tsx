@@ -10,6 +10,8 @@ import {
   Paper,
   Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import { isLocal } from "../utils/debug";
@@ -34,6 +36,7 @@ export default function Testing() {
   // Real first-page scraper
   const [scraperKeyword, setScraperKeyword] = useState("");
   const [scraperHeadless, setScraperHeadless] = useState(true);
+  const [scraperCountry, setScraperCountry] = useState<string | null>(null);
   const [scraperLoading, setScraperLoading] = useState(false);
   const [scraperResult, setScraperResult] = useState<unknown>(null);
   const [scraperError, setScraperError] = useState<string | null>(null);
@@ -92,7 +95,7 @@ export default function Testing() {
       const res = await fetch("/api/scraper/first-page", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: scraperKeyword.trim(), headless: scraperHeadless, test_screenshot: true }),
+        body: JSON.stringify({ keyword: scraperKeyword.trim(), headless: scraperHeadless, test_screenshot: true, country: scraperCountry }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setScraperResult(await res.json());
@@ -226,6 +229,23 @@ export default function Testing() {
           >
             {scraperLoading ? "Scraping…" : "Run Scrape"}
           </Button>
+        </Box>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1, flexWrap: "wrap" }}>
+          <Typography variant="caption" color="text.secondary">Land:</Typography>
+          <ToggleButtonGroup
+            value={scraperCountry}
+            exclusive
+            onChange={(_, val) => setScraperCountry(val)}
+            size="small"
+            disabled={scraperLoading}
+          >
+            <ToggleButton value="us" sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}>🇺🇸 USA</ToggleButton>
+            <ToggleButton value="de" sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}>🇩🇪 DE</ToggleButton>
+            <ToggleButton value="fr" sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}>🇫🇷 FR</ToggleButton>
+          </ToggleButtonGroup>
+          <Typography variant="caption" color="text.disabled">
+            {scraperCountry ? `→ proxy country-${scraperCountry}` : "Standard (Webshare-Pool)"}
+          </Typography>
         </Box>
         {isLocal && (
           <FormControlLabel
