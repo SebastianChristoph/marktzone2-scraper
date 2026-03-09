@@ -37,6 +37,7 @@ export default function Testing() {
   const [scraperLoading, setScraperLoading] = useState(false);
   const [scraperResult, setScraperResult] = useState<unknown>(null);
   const [scraperError, setScraperError] = useState<string | null>(null);
+  const [scraperDuration, setScraperDuration] = useState<number | null>(null);
 
   // Real product scraper
   const [productAsin, setProductAsin] = useState("");
@@ -44,6 +45,7 @@ export default function Testing() {
   const [productLoading, setProductLoading] = useState(false);
   const [productResult, setProductResult] = useState<unknown>(null);
   const [productError, setProductError] = useState<string | null>(null);
+  const [productDuration, setProductDuration] = useState<number | null>(null);
   const [deletingScreenshots, setDeletingScreenshots] = useState(false);
 
   async function handleDeleteTestScreenshots() {
@@ -61,6 +63,8 @@ export default function Testing() {
     setProductLoading(true);
     setProductResult(null);
     setProductError(null);
+    setProductDuration(null);
+    const t0 = Date.now();
     try {
       const res = await fetch("/api/scraper/product", {
         method: "POST",
@@ -72,6 +76,7 @@ export default function Testing() {
     } catch (e) {
       setProductError(e instanceof Error ? e.message : "Unknown error");
     } finally {
+      setProductDuration((Date.now() - t0) / 1000);
       setProductLoading(false);
     }
   }
@@ -81,6 +86,8 @@ export default function Testing() {
     setScraperLoading(true);
     setScraperResult(null);
     setScraperError(null);
+    setScraperDuration(null);
+    const t0 = Date.now();
     try {
       const res = await fetch("/api/scraper/first-page", {
         method: "POST",
@@ -92,6 +99,7 @@ export default function Testing() {
     } catch (e) {
       setScraperError(e instanceof Error ? e.message : "Unknown error");
     } finally {
+      setScraperDuration((Date.now() - t0) / 1000);
       setScraperLoading(false);
     }
   }
@@ -233,6 +241,11 @@ export default function Testing() {
             sx={{ mb: 1 }}
           />
         )}
+        {scraperDuration !== null && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            Dauer: <strong>{scraperDuration.toFixed(2)}s</strong>
+          </Typography>
+        )}
         {scraperError && <Typography color="error" variant="body2" mb={1}>Fehler: {scraperError}</Typography>}
         {scraperResult && (
           <Box>
@@ -302,6 +315,11 @@ export default function Testing() {
             label={<Typography variant="caption">Browser sichtbar (nicht headless)</Typography>}
             sx={{ mb: 1 }}
           />
+        )}
+        {productDuration !== null && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            Dauer: <strong>{productDuration.toFixed(2)}s</strong>
+          </Typography>
         )}
         {productError && <Typography color="error" variant="body2" mb={1}>Fehler: {productError}</Typography>}
         {productResult && (
