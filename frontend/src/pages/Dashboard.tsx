@@ -18,6 +18,7 @@ import {
   TableRow,
   Tooltip,
   Typography,
+  TextField,
 } from "@mui/material";
 
 interface DailySession {
@@ -126,6 +127,313 @@ function DailyRunCard({ session }: { session: DailySession }) {
   );
 }
 
+// ── Health Monitor ────────────────────────────────────────────────────────────
+
+interface KeywordResult {
+  keyword: string;
+  ok: boolean;
+  asin_count?: number;
+  asins?: string[];
+  duration_s?: number;
+  error?: string | null;
+}
+
+interface AsinResult {
+  asin: string;
+  ok: boolean;
+  missing_fields?: string[];
+  duration_s?: number;
+  error?: string | null;
+  data?: Record<string, unknown>;
+}
+
+interface HealthCheck {
+  id: number;
+  checked_at: string;
+  overall_ok: boolean;
+  duration_s: number | null;
+  details: {
+    keywords: KeywordResult[];
+    asins: AsinResult[];
+  };
+}
+
+interface HealthConfig {
+  asins: string[];
+  keywords: string[];
+}
+
+function HealthStatusWidget() {
+  const [check, setCheck] = useState<HealthCheck | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [config, setConfig] = useState<HealthConfig | null>(null);
+  const [editAsins, setEditAsins] = useState("");
+  const [editKeywords, setEditKeywords] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch("/api/health-monitor/status");
+      if (res.ok) {
+        const data = await res.json();
+        setCheck(data.check ?? null);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  async function fetchConfig() {
+    try {
+      const res = await fetch("/api/health-monitor/config");
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+        setEditAsins(data.asins.join("\n"));
+        setEditKeywords(data.keywords.join("\n"));
+      }
+    } catch { /* non-critical */ }
+  }
+
+  async function saveConfig() {
+    setSaving(true);
+    try {
+      await fetch("/api/health-monitor/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asins: editAsins.split("\n").map((s) => s.trim()).filter(Boolean),
+          keywords: editKeywords.split("\n").map((s) => s.trim()).filter(Boolean),
+        }),
+      });
+      await fetchConfig();
+      setConfigOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function triggerRun() {
+    setRunning(true);
+    try {
+      await fetch("/api/health-monitor/run", { method: "POST" });
+      setTimeout(fetchStatus, 3000);
+      setTimeout(fetchStatus, 8000);
+      setTimeout(fetchStatus, 15000);
+    } finally {
+      setTimeout(() => setRunning(false), 15000);
+    }
+  }
+
+  useEffect(() => {
+    fetchStatus();
+    const id = setInterval(fetchStatus, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const ok = check?.overall_ok ?? null;
+  const checkedAgo = check
+    ? (() => {
+        const secs = Math.floor((Date.now() - new Date(check.checked_at).getTime()) / 1000);
+        if (secs < 60) return `${secs}s`;
+        if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+        return `${Math.floor(secs / 3600)}h`;
+      })()
+    : null;
+
+  return (
+    <>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          cursor: check ? "pointer" : "default",
+          userSelect: "none",
+        }}
+        onClick={() => check && setDetailOpen(true)}
+      >
+        <Box
+          sx={{
+            width: 10,
+            height: 10,
+            borderRadius: "50%",
+            bgcolor: ok === null ? "text.disabled" : ok ? "success.main" : "error.main",
+            flexShrink: 0,
+          }}
+        />
+        <Typography variant="caption" color="text.secondary">
+          Scraper {ok === null ? "—" : ok ? "OK" : "FEHLER"}
+          {checkedAgo && ` · vor ${checkedAgo}`}
+        </Typography>
+        <Tooltip title="Konfigurieren">
+          <IconButton
+            size="small"
+            sx={{ ml: 0.5, fontSize: "0.72rem" }}
+            onClick={(e) => { e.stopPropagation(); setConfigOpen(true); fetchConfig(); }}
+          >
+            ⚙
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Jetzt prüfen">
+          <IconButton
+            size="small"
+            sx={{ fontSize: "0.72rem" }}
+            onClick={(e) => { e.stopPropagation(); triggerRun(); }}
+            disabled={running}
+          >
+            {running ? <CircularProgress size={12} /> : "↻"}
+          </IconButton>
+        </Tooltip>
+      </Box>
+
+      {/* Detail modal */}
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="sm" fullWidth>
+        {check && (
+          <>
+            <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+                  bgcolor: check.overall_ok ? "success.main" : "error.main",
+                }}
+              />
+              <span>Scraper Health — {check.overall_ok ? "Alles OK" : "Problem erkannt"}</span>
+              <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+                {new Date(check.checked_at).toLocaleString("de-DE")}
+                {check.duration_s != null && ` · ${check.duration_s.toFixed(1)}s`}
+              </Typography>
+              <IconButton size="small" onClick={() => setDetailOpen(false)}>✕</IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              {/* Keywords */}
+              {check.details.keywords.length > 0 && (
+                <Box mb={2}>
+                  <Typography variant="overline" color="text.secondary" fontWeight={700}>
+                    First-Page Scraper
+                  </Typography>
+                  {check.details.keywords.map((kw) => (
+                    <Paper key={kw.keyword} variant="outlined" sx={{ p: 1.5, mt: 1 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: kw.ok ? "success.main" : "error.main" }} />
+                        <Typography variant="body2" fontWeight={600}>"{kw.keyword}"</Typography>
+                        {kw.asin_count !== undefined && (
+                          <Typography variant="caption" color="text.secondary">
+                            {kw.asin_count} ASINs gefunden
+                            {kw.duration_s != null && ` · ${kw.duration_s}s`}
+                          </Typography>
+                        )}
+                      </Box>
+                      {kw.error && (
+                        <Typography variant="caption" color="error.main" sx={{ mt: 0.5, display: "block" }}>
+                          Fehler: {kw.error}
+                        </Typography>
+                      )}
+                      {!kw.ok && !kw.error && (
+                        <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: "block" }}>
+                          Weniger als 5 ASINs (min. erforderlich)
+                        </Typography>
+                      )}
+                    </Paper>
+                  ))}
+                </Box>
+              )}
+              {/* ASINs */}
+              {check.details.asins.length > 0 && (
+                <Box>
+                  <Typography variant="overline" color="text.secondary" fontWeight={700}>
+                    Produkt-Scraper
+                  </Typography>
+                  {check.details.asins.map((a) => (
+                    <Paper key={a.asin} variant="outlined" sx={{ p: 1.5, mt: 1 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: a.ok ? "success.main" : "error.main" }} />
+                        <Typography variant="body2" fontFamily="monospace" fontWeight={600}>{a.asin}</Typography>
+                        {a.duration_s != null && (
+                          <Typography variant="caption" color="text.secondary">{a.duration_s}s</Typography>
+                        )}
+                      </Box>
+                      {a.data && a.ok && (
+                        <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 1 }}>
+                          {Object.entries(a.data).map(([k, v]) => (
+                            <Chip
+                              key={k}
+                              label={`${k}: ${v ?? "—"}`}
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontSize: "0.68rem", height: 20 }}
+                            />
+                          ))}
+                        </Box>
+                      )}
+                      {a.missing_fields && a.missing_fields.length > 0 && (
+                        <Typography variant="caption" color="error.main" sx={{ mt: 0.5, display: "block" }}>
+                          Fehlende Felder: {a.missing_fields.join(", ")}
+                        </Typography>
+                      )}
+                      {a.error && (
+                        <Typography variant="caption" color="error.main" sx={{ mt: 0.5, display: "block" }}>
+                          Fehler: {a.error}
+                        </Typography>
+                      )}
+                    </Paper>
+                  ))}
+                </Box>
+              )}
+            </DialogContent>
+          </>
+        )}
+      </Dialog>
+
+      {/* Config modal */}
+      <Dialog open={configOpen} onClose={() => setConfigOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center" }}>
+          Health Monitor Konfiguration
+          <IconButton size="small" sx={{ ml: "auto" }} onClick={() => setConfigOpen(false)}>✕</IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            Je eine ASIN / ein Keyword pro Zeile. Prüfintervall: alle 5 Stunden.
+          </Typography>
+          <TextField
+            label="ASINs"
+            multiline
+            minRows={3}
+            fullWidth
+            value={editAsins}
+            onChange={(e) => setEditAsins(e.target.value)}
+            sx={{ mb: 2 }}
+            size="small"
+            placeholder="B0FWR9H9L9&#10;B0FG7P8WMW"
+          />
+          <TextField
+            label="Keywords (First-Page)"
+            multiline
+            minRows={2}
+            fullWidth
+            value={editKeywords}
+            onChange={(e) => setEditKeywords(e.target.value)}
+            size="small"
+            placeholder="creatine"
+          />
+          <Button
+            variant="contained"
+            size="small"
+            fullWidth
+            sx={{ mt: 2 }}
+            onClick={saveConfig}
+            disabled={saving}
+          >
+            {saving ? "Speichern…" : "Speichern"}
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Ad-hoc job types ──────────────────────────────────────────────────────────
+
 interface MarketResult {
   market_name: string;
   products: unknown[];
@@ -217,18 +525,22 @@ export default function Dashboard() {
 
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 4 }}>
         <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, ml: "auto" }}>
-          <Box sx={{
-            width: 8, height: 8, borderRadius: "50%", bgcolor: "success.main",
-            animation: "pulse 2s ease-in-out infinite",
-            "@keyframes pulse": {
-              "0%, 100%": { opacity: 1 },
-              "50%": { opacity: 0.3 },
-            }
-          }} />
-          <Typography variant="caption" color="text.secondary">
-            Live{lastUpdated ? ` · ${lastUpdated.toLocaleTimeString()}` : ""}
-          </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, ml: "auto" }}>
+          <HealthStatusWidget />
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Box sx={{
+              width: 8, height: 8, borderRadius: "50%", bgcolor: "success.main",
+              animation: "pulse 2s ease-in-out infinite",
+              "@keyframes pulse": {
+                "0%, 100%": { opacity: 1 },
+                "50%": { opacity: 0.3 },
+              }
+            }} />
+            <Typography variant="caption" color="text.secondary">
+              Live{lastUpdated ? ` · ${lastUpdated.toLocaleTimeString()}` : ""}
+            </Typography>
+          </Box>
         </Box>
       </Box>
 
