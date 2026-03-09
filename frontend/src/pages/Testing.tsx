@@ -244,7 +244,7 @@ export default function Testing() {
             <ToggleButton value="fr" sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}>🇫🇷 FR</ToggleButton>
           </ToggleButtonGroup>
           <Typography variant="caption" color="text.disabled">
-            {scraperCountry ? `→ proxy country-${scraperCountry}` : "Standard (Webshare-Pool)"}
+            {scraperCountry ? `→ proxy country-${scraperCountry}` : "→ proxy country-us (default)"}
           </Typography>
         </Box>
         {isLocal && (

@@ -39,9 +39,10 @@ def get_proxy(country: Optional[str] = None) -> Optional[dict]:
     if _parsed_base is None:
         return None
 
+    effective_country = (country or "us").lower()
     username = _parsed_base.username
-    if country and country.lower() in COUNTRY_CODES:
-        username = f"{username}-country-{COUNTRY_CODES[country.lower()]}"
+    if effective_country in COUNTRY_CODES:
+        username = f"{username}-country-{COUNTRY_CODES[effective_country]}"
 
     return {
         "server": f"{_parsed_base.scheme}://{_parsed_base.hostname}:{_parsed_base.port}",
