@@ -41,6 +41,8 @@ export default function Testing() {
   const [scraperResult, setScraperResult] = useState<unknown>(null);
   const [scraperError, setScraperError] = useState<string | null>(null);
   const [scraperDuration, setScraperDuration] = useState<number | null>(null);
+  const [scraperElapsed, setScraperElapsed] = useState(0);
+  const scraperTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Real product scraper
   const [productAsin, setProductAsin] = useState("");
@@ -90,7 +92,11 @@ export default function Testing() {
     setScraperResult(null);
     setScraperError(null);
     setScraperDuration(null);
+    setScraperElapsed(0);
     const t0 = Date.now();
+    scraperTimerRef.current = setInterval(() => {
+      setScraperElapsed(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
     try {
       const res = await fetch("/api/scraper/first-page", {
         method: "POST",
@@ -102,6 +108,7 @@ export default function Testing() {
     } catch (e) {
       setScraperError(e instanceof Error ? e.message : "Unknown error");
     } finally {
+      if (scraperTimerRef.current) { clearInterval(scraperTimerRef.current); scraperTimerRef.current = null; }
       setScraperDuration((Date.now() - t0) / 1000);
       setScraperLoading(false);
     }
@@ -261,6 +268,24 @@ export default function Testing() {
             sx={{ mb: 1 }}
           />
         )}
+        {scraperLoading && (() => {
+          const s = scraperElapsed;
+          const status =
+            s < 30 ? `Versuch 1/3 — Amazon lädt… (${s}s)` :
+            s < 40 ? `Backoff 10s nach Versuch 1… (${s}s)` :
+            s < 70 ? `Versuch 2/3 — erneuter Versuch… (${s}s)` :
+            s < 100 ? `Backoff 30s nach Versuch 2… (${s}s)` :
+            `Versuch 3/3 — letzter Versuch… (${s}s)`;
+          const progress = Math.min((s / 130) * 100, 98);
+          return (
+            <Box sx={{ mb: 1.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                {status}
+              </Typography>
+              <LinearProgress variant="determinate" value={progress} sx={{ borderRadius: 1 }} />
+            </Box>
+          );
+        })()}
         {scraperDuration !== null && (
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
             Dauer: <strong>{scraperDuration.toFixed(2)}s</strong>
