@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -129,11 +130,14 @@ async def _scrape_asin_details(job: dict, market_name: str, asins: list[dict]) -
     now = datetime.now(timezone.utc).isoformat()
     products = []
     asin_errors = []
+    asin_durations: list[float] = []
 
     for item in asins:
         asin = item["asin"]
+        t_asin = time.monotonic()
         try:
             result = await _scrape_one_product(asin)
+            asin_durations.append(round(time.monotonic() - t_asin, 2))
             if result is None:
                 asin_errors.append(f"{asin}: scrape returned None")
                 continue
@@ -158,9 +162,11 @@ async def _scrape_asin_details(job: dict, market_name: str, asins: list[dict]) -
                 "last_scraped": now,
             })
         except Exception as e:
+            asin_durations.append(round(time.monotonic() - t_asin, 2))
             asin_errors.append(f"{asin}: {e}")
             logger.warning(f"[Job {job['job_id'][:8]}] ASIN {asin} failed: {e}")
 
+    job["timing"]["markets"].setdefault(market_name, {})["asin_durations_s"] = asin_durations
     job["progress"]["done"] += 1
 
     if asin_errors:
@@ -176,11 +182,24 @@ async def _scrape_asin_details(job: dict, market_name: str, asins: list[dict]) -
 async def _process_job(job_id: str) -> None:
     job = _jobs[job_id]
     job["status"] = "running"
+    job_start = time.monotonic()
+    job["timing"] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "markets": {},
+    }
 
     # Phase 1: first-page scraping — all markets in parallel (throttled by semaphore)
     job["phase"] = "first_page"
+
+    async def _timed_phase1(market_name: str):
+        t0 = time.monotonic()
+        try:
+            return await _scrape_first_page(job, market_name)
+        finally:
+            job["timing"]["markets"].setdefault(market_name, {})["phase1_duration_s"] = round(time.monotonic() - t0, 2)
+
     raw_first = await asyncio.gather(
-        *(_scrape_first_page(job, m) for m in job["markets"]),
+        *(_timed_phase1(m) for m in job["markets"]),
         return_exceptions=True,
     )
 
@@ -195,9 +214,16 @@ async def _process_job(job_id: str) -> None:
     # Phase 2: ASIN detail scraping — markets in parallel, ASINs sequential per market
     job["phase"] = "asin_details"
     limit = job.get("max_asins_per_market")
+
+    async def _timed_phase2(market_name: str, asins: list[dict]):
+        t0 = time.monotonic()
+        result = await _scrape_asin_details(job, market_name, asins)
+        job["timing"]["markets"].setdefault(market_name, {})["phase2_duration_s"] = round(time.monotonic() - t0, 2)
+        return result
+
     if first_page:
         detail_results = await asyncio.gather(
-            *(_scrape_asin_details(job, r["market_name"], r["asins"][:limit] if limit else r["asins"]) for r in first_page)
+            *(_timed_phase2(r["market_name"], r["asins"][:limit] if limit else r["asins"]) for r in first_page)
         )
         # Merge suggestions from Phase 1 into Phase 2 results
         suggestions_by_market = {r["market_name"]: r.get("suggestions", []) for r in first_page}
@@ -212,9 +238,12 @@ async def _process_job(job_id: str) -> None:
 
     job["phase"] = "done"
     job["status"] = "failed" if not job["results"] else "completed"
+    job["timing"]["completed_at"] = datetime.now(timezone.utc).isoformat()
+    job["timing"]["total_duration_s"] = round(time.monotonic() - job_start, 2)
     logger.info(
         f"[Job {job_id[:8]}] Finished — status={job['status']}, "
-        f"markets_ok={len(job['results'] or [])}, errors={len(job['errors'])}"
+        f"markets_ok={len(job['results'] or [])}, errors={len(job['errors'])}, "
+        f"duration={job['timing']['total_duration_s']}s"
     )
     save_job(job)
 
@@ -224,13 +253,25 @@ async def _process_asin_job(job_id: str, markets: list[AsinMarket]) -> None:
     job = _jobs[job_id]
     job["status"] = "running"
     job["phase"] = "asin_details"
+    job_start = time.monotonic()
+    job["timing"] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "markets": {},
+    }
 
     asins_by_market = [
         {"market_name": m.name, "asins": [{"name": a, "asin": a} for a in m.asins]}
         for m in markets
     ]
+
+    async def _timed_phase2(market_name: str, asins: list[dict]):
+        t0 = time.monotonic()
+        result = await _scrape_asin_details(job, market_name, asins)
+        job["timing"]["markets"].setdefault(market_name, {})["phase2_duration_s"] = round(time.monotonic() - t0, 2)
+        return result
+
     detail_results = await asyncio.gather(
-        *(_scrape_asin_details(job, r["market_name"], r["asins"]) for r in asins_by_market)
+        *(_timed_phase2(r["market_name"], r["asins"]) for r in asins_by_market)
     )
     job["results"] = [r for r in detail_results if r["products"]]
     for r in detail_results:
@@ -239,6 +280,8 @@ async def _process_asin_job(job_id: str, markets: list[AsinMarket]) -> None:
 
     job["phase"] = "done"
     job["status"] = "failed" if not job["results"] else "completed"
+    job["timing"]["completed_at"] = datetime.now(timezone.utc).isoformat()
+    job["timing"]["total_duration_s"] = round(time.monotonic() - job_start, 2)
     save_job(job)
 
 
@@ -276,6 +319,7 @@ async def create_job(request: CreateJobRequest, background_tasks: BackgroundTask
         "errors": [],
         "results": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "timing": {},
     }
     _jobs[job_id] = job
     background_tasks.add_task(_process_job, job_id)
@@ -297,6 +341,7 @@ async def create_asin_job(request: CreateAsinJobRequest, background_tasks: Backg
         "errors": [],
         "results": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "timing": {},
     }
     _jobs[job_id] = job
     background_tasks.add_task(_process_asin_job, job_id, request.markets)

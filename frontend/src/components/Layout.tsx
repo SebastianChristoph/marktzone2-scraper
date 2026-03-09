@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { label: "Dashboard", path: "/dashboard" },
   { label: "Testing", path: "/testing" },
   { label: "Logging", path: "/logging" },
+  { label: "Statistiken", path: "/statistics" },
 ];
 
 export default function Layout() {
