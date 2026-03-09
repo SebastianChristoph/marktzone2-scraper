@@ -329,7 +329,12 @@ class FirstPageScraper:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             safe_ctx = re.sub(r"[^\w\-]", "_", context)[:40]
             filename = f"{ts}_{safe_ctx}_{error_type}.png"
-            page.screenshot(path=str(SCREENSHOTS_DIR / filename), full_page=False)
+            # Stop any pending navigation before screenshotting (avoids hanging)
+            try:
+                page.goto("about:blank", timeout=3000)
+            except Exception:
+                pass
+            page.screenshot(path=str(SCREENSHOTS_DIR / filename), full_page=False, timeout=5000)
             return filename
         except Exception as e:
             logger.warning(f"[FP] Screenshot failed: {e}")
