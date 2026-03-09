@@ -214,7 +214,13 @@ export default function Testing() {
       <Divider sx={{ mb: 3, mt: 0.5 }} />
 
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
-        <Typography variant="subtitle1" fontWeight={600} mb={2}>Amazon First Page Scraper</Typography>
+        <Typography variant="subtitle1" fontWeight={600} mb={1.5}>Amazon First Page Scraper</Typography>
+        <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+          {["Creatine", "Organic red beet"].map((kw) => (
+            <Chip key={kw} label={kw} size="small" variant="outlined" onClick={() => setScraperKeyword(kw)}
+              sx={{ cursor: "pointer", fontSize: "0.72rem" }} />
+          ))}
+        </Box>
         <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
           <TextField
             label="Keyword"
@@ -307,7 +313,13 @@ export default function Testing() {
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
-        <Typography variant="subtitle1" fontWeight={600} mb={2}>Amazon Product Scraper</Typography>
+        <Typography variant="subtitle1" fontWeight={600} mb={1.5}>Amazon Product Scraper</Typography>
+        <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+          {["B0F5WZ4V5N", "B0CTNWBT1Z"].map((asin) => (
+            <Chip key={asin} label={asin} size="small" variant="outlined" onClick={() => setProductAsin(asin)}
+              sx={{ cursor: "pointer", fontSize: "0.72rem", fontFamily: "monospace" }} />
+          ))}
+        </Box>
         <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
           <TextField
             label="ASIN"

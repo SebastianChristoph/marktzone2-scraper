@@ -12,3 +12,12 @@ Der Ablauf sollte folgendermaßen sein.
 Anmerkungen:
 - als Admin will ich natürlich wissen, wie mein daily scraper performt: wie lange dauert ein Product-Scraping,wie lange der daily_scraper,wieviel Products wurden geupdatet. Es gibt eine "statistics" seite auf der scraper-ui, hier soll es eine neue Sektion für den daily_scraper eben
 - es ist super wichtig, dass der daily-scraper nie komplett abbricht. Scraping ist Fehler-Anfällig, sollte ein Product/market mal nicht gescrapet werden können, lieber überspringen /failen und dann weiter machen. Es gibt ja die error_logs,die mir dann sagen, warum es fehlshclug.Bau also ein robustes Fehler-Handling ein
+
+
+chau dir webshare1 auf dem Desktop an, stimmen die credentials mit unserem code?
+ich erhalte beim test first page:Amazon First Page Scraper
+creatine
+Keyword
+Dauer: 90.28s
+Fehler: HTTP 504
+logging.png auf dem Desktop zeigt dir die logs dazu.
