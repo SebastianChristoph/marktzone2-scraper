@@ -15,7 +15,7 @@ from app.api.security import require_scraper_secret
 from app.db.error_log import log_error
 from app.db.daily_store import (
     start_session, update_session, complete_session,
-    get_current_session, get_running_session, get_history,
+    get_current_session, get_running_session, get_history, clear_history,
 )
 
 router = APIRouter(prefix="/daily", tags=["daily"])
@@ -229,3 +229,11 @@ async def daily_status() -> dict:
 async def daily_history() -> dict:
     """Return the last 30 daily sessions."""
     return {"sessions": get_history(30)}
+
+
+@router.delete("/history")
+async def delete_daily_history() -> dict:
+    """Delete all completed/failed daily sessions."""
+    deleted = clear_history()
+    logger.info(f"[Daily] Deleted {deleted} sessions from history")
+    return {"ok": True, "deleted": deleted}

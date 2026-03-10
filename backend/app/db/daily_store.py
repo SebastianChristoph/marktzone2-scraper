@@ -130,3 +130,9 @@ def get_history(limit: int = 30) -> list[dict]:
         f"SELECT * FROM daily_sessions ORDER BY started_at DESC LIMIT {PH}", (limit,)
     )
     return [dict(r) for r in fetch_all(cur)]
+
+
+def clear_history() -> int:
+    """Delete all completed/failed daily sessions. Returns number of deleted rows."""
+    cur = _ex(f"DELETE FROM daily_sessions WHERE status != {PH}", ("running",))
+    return cur.rowcount

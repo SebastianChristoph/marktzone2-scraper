@@ -150,6 +150,7 @@ export default function Statistics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deletingDaily, setDeletingDaily] = useState(false);
 
   async function deleteAllStats() {
     if (!confirm("Alle Statistiken (Jobs) löschen?")) return;
@@ -159,6 +160,17 @@ export default function Statistics() {
       await load();
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function deleteDailyHistory() {
+    if (!confirm("Alle Daily-Scraper-Runs löschen?")) return;
+    setDeletingDaily(true);
+    try {
+      await fetch("/api/daily/history", { method: "DELETE" });
+      await load();
+    } finally {
+      setDeletingDaily(false);
     }
   }
 
@@ -382,9 +394,21 @@ export default function Statistics() {
       </Box>
 
       {/* ── Daily Scraper ──────────────────────────────────────────────── */}
-      <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>
-        Daily Scraper — Historie
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>
+          Daily Scraper — Historie
+        </Typography>
+        <Button
+          variant="outlined"
+          color="error"
+          size="small"
+          sx={{ ml: "auto", whiteSpace: "nowrap" }}
+          onClick={deleteDailyHistory}
+          disabled={deletingDaily || dailyHistory.length === 0}
+        >
+          {deletingDaily ? "Löschen…" : "Daily-Historie löschen"}
+        </Button>
+      </Box>
       <Divider sx={{ mt: 0.5, mb: 2 }} />
 
       {dailyHistory.length === 0 ? (
