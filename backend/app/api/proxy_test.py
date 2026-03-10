@@ -99,13 +99,15 @@ async def run_proxy_test() -> dict:
 
     # Build variants to test
     parts = base_user.rsplit("-", 1)
-    country_user_upper = f"{parts[0]}-US-{parts[1]}" if len(parts) == 2 else f"{base_user}-US"  # nbbbwudu-US-1
-    country_user_lower = f"{parts[0]}-us-{parts[1]}" if len(parts) == 2 else f"{base_user}-us"  # nbbbwudu-us-1
+    base = parts[0] if len(parts) == 2 else base_user
+    # Sample 3 random US sessions (1–10) to check pool health
+    import random
+    sampled_sessions = random.sample(range(1, 11), 3)
+    country_users = [f"{base}-US-{s}" for s in sorted(sampled_sessions)]
 
     variants = [
-        _run_variant(server, base_user, password, direct_ip),              # raw
-        _run_variant(server, country_user_upper, password, direct_ip),     # nbbbwudu-US-1 (uppercase)
-        _run_variant(server, country_user_lower, password, direct_ip),     # nbbbwudu-us-1 (lowercase)
+        _run_variant(server, base_user, password, direct_ip),                          # raw
+        *[_run_variant(server, u, password, direct_ip) for u in country_users],        # US-x, US-y, US-z
     ]
 
     return {

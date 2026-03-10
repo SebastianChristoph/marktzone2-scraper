@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 from urllib.parse import urlparse
 from typing import Optional
 
@@ -11,8 +12,11 @@ _parsed_base: Optional[object] = None
 _initialized = False
 
 # Webshare country code mapping (uppercase, inserted between base and session)
-# Format: {base}-{COUNTRY}-{session}  e.g. nbbbwudu-US-1
+# Format: {base}-{COUNTRY}-{session}  e.g. nbbbwudu-US-3
 COUNTRY_CODES = {"us": "US", "de": "DE", "fr": "FR"}
+
+# Number of available sessions per country (as seen in Webshare dashboard)
+SESSION_COUNT = {"us": 10, "de": 1, "fr": 1}
 
 
 def _init() -> None:
@@ -46,11 +50,13 @@ def get_proxy(country: Optional[str] = None) -> Optional[dict]:
     effective_country = (country or "us").lower()
 
     if effective_country in COUNTRY_CODES:
-        # Split off the session number: "nbbbwudu-1" → base="nbbbwudu", session="1"
+        # Pick a random session number from the available pool
+        max_sessions = SESSION_COUNT.get(effective_country, 1)
+        session = random.randint(1, max_sessions)
         parts = username.rsplit("-", 1)
-        if len(parts) == 2:
-            base, session = parts
-            username = f"{base}-{COUNTRY_CODES[effective_country]}-{session}"
+        base = parts[0] if len(parts) == 2 else username
+        username = f"{base}-{COUNTRY_CODES[effective_country]}-{session}"
+        logger.debug(f"[Proxy] Using session {session}/{max_sessions} for country={effective_country}")
 
     return {
         "server": f"{_parsed_base.scheme}://{_parsed_base.hostname}:{_parsed_base.port}",
