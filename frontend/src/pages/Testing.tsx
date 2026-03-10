@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -50,6 +51,26 @@ export default function Testing() {
   const [productError, setProductError] = useState<string | null>(null);
   const [productDuration, setProductDuration] = useState<number | null>(null);
   const [deletingScreenshots, setDeletingScreenshots] = useState(false);
+
+  // Proxy test
+  const [proxyLoading, setProxyLoading] = useState(false);
+  const [proxyResult, setProxyResult] = useState<Record<string, unknown> | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+
+  async function handleProxyTest() {
+    setProxyLoading(true);
+    setProxyResult(null);
+    setProxyError(null);
+    try {
+      const res = await fetch("/api/proxy-test");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setProxyResult(await res.json());
+    } catch (e) {
+      setProxyError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setProxyLoading(false);
+    }
+  }
 
   async function handleDeleteTestScreenshots() {
     setDeletingScreenshots(true);
@@ -213,7 +234,98 @@ export default function Testing() {
       </Typography>
       <Divider sx={{ mb: 3, mt: 0.5 }} />
 
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
+      {/* Proxy Test */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: proxyResult || proxyError ? 2 : 0 }}>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={600}>Proxy Test</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Prüft ob der Proxy korrekt konfiguriert ist und Amazon erreichbar ist (kein Playwright, ~15s).
+            </Typography>
+          </Box>
+          <Button
+            variant="outlined"
+            onClick={handleProxyTest}
+            disabled={proxyLoading}
+            startIcon={proxyLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            sx={{ whiteSpace: "nowrap", minWidth: 130, ml: 2, flexShrink: 0 }}
+          >
+            {proxyLoading ? "Teste…" : "Proxy testen"}
+          </Button>
+        </Box>
+        {proxyError && <Alert severity="error" sx={{ mt: 1.5 }}>{proxyError}</Alert>}
+        {proxyResult && (() => {
+          const r = proxyResult;
+          if (!r.proxy_configured) {
+            return <Alert severity="error" sx={{ mt: 1.5 }}>Proxy nicht konfiguriert — WEBSHARE_PROXY_URL fehlt</Alert>;
+          }
+
+          type Variant = {
+            username: string;
+            ip_result: { ip: string | null; ms: number | null; status_code: number | null; error: string | null };
+            amazon_result: { status_code: number | null; ms: number | null; blocked: boolean; error: string | null };
+            proxy_working: boolean;
+            amazon_ok: boolean;
+          };
+
+          const variants = (r.variants ?? []) as Variant[];
+          const variantLabels = ["Raw (kein Suffix)", "nbbbwudu-US-1 (Webshare-Format)"];
+          const anyOk = variants.some((v) => v.proxy_working && v.amazon_ok);
+
+          return (
+            <Box>
+              <Alert severity={anyOk ? "success" : "error"} sx={{ mb: 2 }}>
+                {anyOk ? "Proxy funktioniert" : "Beide Varianten schlagen fehl"}
+              </Alert>
+              <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+                Server IP (direkt): <strong>{String(r.direct_ip ?? "–")}</strong> &nbsp;·&nbsp; Proxy: <strong>{String(r.proxy_server ?? "–")}</strong>
+              </Typography>
+              {variants.map((v, i) => {
+                const allOk = v.proxy_working && v.amazon_ok;
+                const rows = [
+                  { label: "Username", value: v.username },
+                  {
+                    label: "Exit IP",
+                    value: v.ip_result.error ? `Fehler: ${v.ip_result.error}` : `${v.ip_result.ip} (${v.ip_result.ms}ms)`,
+                    ok: v.proxy_working,
+                  },
+                  {
+                    label: "Amazon",
+                    value: v.amazon_result.error
+                      ? `Fehler: ${v.amazon_result.error}`
+                      : `HTTP ${v.amazon_result.status_code} (${v.amazon_result.ms}ms)${v.amazon_result.blocked ? " — BLOCKIERT" : ""}`,
+                    ok: v.amazon_ok,
+                  },
+                ];
+                return (
+                  <Box key={i} sx={{ mb: 2, pb: 2, borderBottom: i < variants.length - 1 ? "1px solid" : "none", borderColor: "divider" }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 1 }}>
+                        {variantLabels[i] ?? `Variante ${i + 1}`}
+                      </Typography>
+                      <Chip label={allOk ? "OK" : "FEHLER"} size="small" color={allOk ? "success" : "error"} sx={{ fontSize: "0.65rem", height: 18 }} />
+                    </Box>
+                    <Box sx={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", alignItems: "baseline", pl: 1 }}>
+                      {rows.map(({ label: rl, value, ok: rowOk }) => (
+                        <>
+                          <Typography key={`l-${i}-${rl}`} variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>{rl}</Typography>
+                          <Typography key={`v-${i}-${rl}`} variant="caption" sx={{
+                            fontFamily: "monospace", wordBreak: "break-all",
+                            color: rowOk === true ? "success.main" : rowOk === false ? "error.main" : "text.primary",
+                            fontWeight: rowOk != null ? 600 : 400,
+                          }}>{value}</Typography>
+                        </>
+                      ))}
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+          );
+        })()}
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={1.5}>Amazon First Page Scraper</Typography>
         <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
           {["Creatine", "Organic red beet"].map((kw) => (
@@ -312,7 +424,7 @@ export default function Testing() {
         )}
       </Paper>
 
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={1.5}>Amazon Product Scraper</Typography>
         <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
           {["B0F5WZ4V5N", "B0CTNWBT1Z"].map((asin) => (
@@ -397,7 +509,7 @@ export default function Testing() {
       </Paper>
 
       {/* Real cluster job */}
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 4 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Cluster Scraping Job (real)</Typography>
         <Typography variant="caption" color="text.secondary" display="block" mb={2}>
           Startet einen echten Job: First-Page → ASIN-Details. Polling alle 1.5s.
@@ -440,7 +552,7 @@ export default function Testing() {
       <Divider sx={{ mb: 3, mt: 0.5 }} />
 
       {/* First page scrape */}
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 3 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={2}>Amazon First Page Scraping simulieren</Typography>
         <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
           <TextField label="Market Name" size="small" value={marketName}
@@ -459,7 +571,7 @@ export default function Testing() {
       </Paper>
 
       {/* ASIN detail scrape */}
-      <Paper variant="outlined" sx={{ p: 3, maxWidth: 600, mb: 3 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={2}>Amazon ASIN Detail Scraping simulieren</Typography>
         <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
           <TextField label="ASINs (komma-separiert)" size="small" value={asins}

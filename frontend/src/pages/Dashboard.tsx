@@ -147,12 +147,25 @@ interface AsinResult {
   data?: Record<string, unknown>;
 }
 
+interface ProxyResult {
+  ok: boolean;
+  username?: string;
+  direct_ip?: string | null;
+  exit_ip?: string | null;
+  ip_error?: string | null;
+  proxy_routing?: boolean;
+  amazon_status?: number | null;
+  amazon_error?: string | null;
+  error?: string | null;
+}
+
 interface HealthCheck {
   id: number;
   checked_at: string;
   overall_ok: boolean;
   duration_s: number | null;
   details: {
+    proxy?: ProxyResult;
     keywords: KeywordResult[];
     asins: AsinResult[];
   };
@@ -232,6 +245,7 @@ function HealthStatusWidget() {
   }, []);
 
   const ok = check?.overall_ok ?? null;
+  const proxyOk = check?.details?.proxy?.ok ?? null;
   const checkedAgo = check
     ? (() => {
         const secs = Math.floor((Date.now() - new Date(check.checked_at).getTime()) / 1000);
@@ -253,17 +267,15 @@ function HealthStatusWidget() {
         }}
         onClick={() => check && setDetailOpen(true)}
       >
-        <Box
-          sx={{
-            width: 10,
-            height: 10,
-            borderRadius: "50%",
-            bgcolor: ok === null ? "text.disabled" : ok ? "success.main" : "error.main",
-            flexShrink: 0,
-          }}
-        />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+          <Box sx={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+            bgcolor: ok === null ? "text.disabled" : ok ? "success.main" : "error.main" }} />
+          <Box sx={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+            bgcolor: proxyOk === null ? "text.disabled" : proxyOk ? "success.main" : "error.main" }} />
+        </Box>
         <Typography variant="caption" color="text.secondary">
           Scraper {ok === null ? "—" : ok ? "OK" : "FEHLER"}
+          {" · "}Proxy {proxyOk === null ? "—" : proxyOk ? "OK" : "FEHLER"}
           {checkedAgo && ` · vor ${checkedAgo}`}
         </Typography>
         <Tooltip title="Konfigurieren">
@@ -306,6 +318,51 @@ function HealthStatusWidget() {
               <IconButton size="small" onClick={() => setDetailOpen(false)}>✕</IconButton>
             </DialogTitle>
             <DialogContent dividers>
+              {/* Proxy */}
+              {check.details.proxy && (
+                <Box mb={2}>
+                  <Typography variant="overline" color="text.secondary" fontWeight={700}>
+                    Proxy
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 1.5, mt: 1 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                      <Box sx={{ width: 8, height: 8, borderRadius: "50%",
+                        bgcolor: check.details.proxy.ok ? "success.main" : "error.main" }} />
+                      <Typography variant="body2" fontWeight={600}>
+                        {check.details.proxy.ok ? "Proxy funktioniert" : "Proxy-Problem"}
+                      </Typography>
+                      {check.details.proxy.username && (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                          {check.details.proxy.username}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box sx={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 12px", pl: 2 }}>
+                      {check.details.proxy.direct_ip && (
+                        <>
+                          <Typography variant="caption" color="text.secondary">Server IP</Typography>
+                          <Typography variant="caption" sx={{ fontFamily: "monospace" }}>{check.details.proxy.direct_ip}</Typography>
+                        </>
+                      )}
+                      <Typography variant="caption" color="text.secondary">Exit IP</Typography>
+                      <Typography variant="caption" sx={{ fontFamily: "monospace",
+                        color: check.details.proxy.proxy_routing ? "success.main" : "error.main", fontWeight: 600 }}>
+                        {check.details.proxy.exit_ip ?? check.details.proxy.ip_error ?? "–"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">Amazon</Typography>
+                      <Typography variant="caption" sx={{
+                        color: check.details.proxy.amazon_status === 200 ? "success.main" : "error.main", fontWeight: 600 }}>
+                        {check.details.proxy.amazon_error ?? `HTTP ${check.details.proxy.amazon_status ?? "–"}`}
+                      </Typography>
+                    </Box>
+                    {check.details.proxy.error && (
+                      <Typography variant="caption" color="error.main" sx={{ mt: 0.5, display: "block" }}>
+                        {check.details.proxy.error}
+                      </Typography>
+                    )}
+                  </Paper>
+                </Box>
+              )}
               {/* Keywords */}
               {check.details.keywords.length > 0 && (
                 <Box mb={2}>
@@ -523,9 +580,9 @@ export default function Dashboard() {
       {/* Daily scraper live progress (shown only when running) */}
       {dailySession && <DailyRunCard session={dailySession} />}
 
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 4 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 4, flexWrap: "wrap" }}>
         <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, ml: "auto" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, ml: "auto", flexWrap: "wrap" }}>
           <HealthStatusWidget />
           <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
@@ -555,7 +612,7 @@ export default function Dashboard() {
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mb: 4 }}>
           {active.map((job) => (
-            <Paper key={job.job_id} variant="outlined" sx={{ p: 2, maxWidth: 560 }}>
+            <Paper key={job.job_id} variant="outlined" sx={{ p: 2, maxWidth: { xs: "100%", sm: 560 } }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1 }}>
                 <CircularProgress size={14} />
                 <Chip label={job.status} color={statusColor(job.status)} size="small" />
@@ -583,7 +640,7 @@ export default function Dashboard() {
       )}
 
       {/* Completed jobs */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 0 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 0, flexWrap: "wrap" }}>
         <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>
           Ad-hoc Scraper — abgeschlossen
         </Typography>

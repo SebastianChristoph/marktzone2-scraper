@@ -111,9 +111,6 @@ class FirstPageScraper:
             try:
                 page = context.new_page()
 
-                # Best-effort: visit homepage first to capture autocomplete suggestions
-                suggestions = self._get_suggestions_sync(page, keyword)
-
                 logger.info(f"[FP] GET {url}")
                 try:
                     page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -147,6 +144,9 @@ class FirstPageScraper:
                     raise RuntimeError("CAPTCHA or bot check detected")
 
                 self._scroll_sync(page)
+
+                # Capture suggestions from the already-loaded search results page
+                suggestions = self._get_suggestions_sync(page, keyword)
 
                 ts_filename = None
                 if test_screenshot:
@@ -186,30 +186,10 @@ class FirstPageScraper:
                 browser.close()
 
     def _get_suggestions_sync(self, page: Page, keyword: str) -> list[str]:
-        """Best-effort: navigate to Amazon homepage, type keyword, capture autocomplete suggestions."""
+        """Best-effort: use the search box on the already-loaded search results page to capture autocomplete."""
         try:
-            page.goto("https://www.amazon.com/", wait_until="domcontentloaded", timeout=20000)
-            time.sleep(random.uniform(1.5, 2.5))
-
-            # Dismiss "ship to Germany" or similar overlay if present
-            try:
-                dismiss = page.query_selector("input[data-action-type='DISMISS']")
-                if not dismiss:
-                    dismiss = page.query_selector("button:has-text('Dismiss')")
-                if dismiss:
-                    dismiss.click()
-                    time.sleep(0.5)
-            except Exception:
-                pass
-
-            # Try multiple selectors for the search box (same strategy as old scraper)
             search_box = None
-            for sel in [
-                "input[role='searchbox']",
-                "#twotabsearchtextbox",
-                "input#twotabsearchtextbox",
-                "input[type='text']",
-            ]:
+            for sel in ["#twotabsearchtextbox", "input[role='searchbox']", "input[type='text']"]:
                 try:
                     el = page.query_selector(sel)
                     if el and el.is_visible():
@@ -219,23 +199,22 @@ class FirstPageScraper:
                     continue
 
             if not search_box:
-                logger.warning("[FP] Suggestions: search box not found on homepage")
+                logger.warning("[FP] Suggestions: search box not found on results page")
                 return []
 
+            # Click the already-filled search box and nudge it to trigger autocomplete
             search_box.click()
             time.sleep(0.5)
-            search_box.type(keyword, delay=100)
-
-            # Wait 3–5 seconds for autocomplete to fully populate (same as old scraper)
-            time.sleep(random.uniform(3.0, 5.0))
+            page.keyboard.press("End")
+            page.keyboard.press("Space")
+            page.keyboard.press("Backspace")
 
             try:
-                page.wait_for_selector("#sac-autocomplete-results-container", timeout=8000)
+                page.wait_for_selector("#sac-autocomplete-results-container", timeout=6000)
             except Exception:
                 logger.warning("[FP] Suggestions: autocomplete container not visible")
                 return []
 
-            # Get full container text and split by newline — same approach as old scraper
             container = page.query_selector("#sac-autocomplete-results-container")
             if not container:
                 return []

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.scrapers.first_page_scraper import FirstPageScraper
 from app.scrapers.product_scraper import ProductScraper
 from app.api.security import require_scraper_secret
+from app.db.error_log import log_error
 from app.db.daily_store import (
     start_session, update_session, complete_session,
     get_current_session, get_running_session, get_history,
@@ -61,6 +62,13 @@ async def _scrape_market(keyword: str) -> tuple[str, list[str], list[str]]:
         return keyword, asins, suggestions
     except Exception as e:
         logger.warning(f"[Daily] Market scrape failed for '{keyword}': {e}")
+        log_error(
+            scraper_type="first_page",
+            context=keyword,
+            error_type="exception",
+            error_message=str(e),
+            url=f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}",
+        )
         return keyword, [], []
 
 
@@ -70,11 +78,34 @@ async def _scrape_product(asin: str) -> dict | None:
         async with _BROWSER_SEM:
             scraper = ProductScraper(headless=True)
             result = await scraper.scrape(asin)
-        if result is None or "error" in result:
+        if result is None:
+            log_error(
+                scraper_type="product",
+                context=asin,
+                error_type="no_result",
+                error_message="Scraper returned None after all retries",
+                url=f"https://www.amazon.com/dp/{asin}?language=en_US",
+            )
+            return None
+        if "error" in result:
+            log_error(
+                scraper_type="product",
+                context=asin,
+                error_type=str(result["error"]),
+                error_message=f"Scraper returned error result: {result['error']}",
+                url=f"https://www.amazon.com/dp/{asin}?language=en_US",
+            )
             return None
         return result
     except Exception as e:
         logger.warning(f"[Daily] Product scrape failed for '{asin}': {e}")
+        log_error(
+            scraper_type="product",
+            context=asin,
+            error_type="exception",
+            error_message=str(e),
+            url=f"https://www.amazon.com/dp/{asin}?language=en_US",
+        )
         return None
 
 

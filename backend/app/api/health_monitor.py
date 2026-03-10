@@ -10,21 +10,90 @@ import logging
 import time
 from datetime import datetime, timezone
 
+import requests as req
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.scrapers.first_page_scraper import FirstPageScraper
 from app.scrapers.product_scraper import ProductScraper
+from app.scrapers.proxy_manager import get_proxy
 from app.db.health_store import get_config, set_config, save_check, get_latest_check, get_history
 
 router = APIRouter(prefix="/health-monitor", tags=["health-monitor"])
 logger = logging.getLogger(__name__)
 
 _CHECK_INTERVAL_S = 5 * 3600  # 5 hours
-_PRODUCT_REQUIRED_FIELDS = ["title", "price", "main_category_rank", "ratings", "avg_rating"]
+_PRODUCT_REQUIRED_FIELDS = ["title", "price", "ratings", "avg_rating"]
 _MIN_FIRST_PAGE_ASINS = 5
 
 _SEM = asyncio.Semaphore(2)  # health checks don't need full 4 slots
+_PROXY_TIMEOUT = 15
+
+
+def _proxy_check_sync() -> dict:
+    """Quick proxy sanity check via requests (no Playwright). Returns ok + details."""
+    proxy = get_proxy()  # uses US by default
+    if not proxy:
+        return {"ok": False, "error": "WEBSHARE_PROXY_URL not set", "exit_ip": None, "amazon_status": None}
+
+    server = proxy["server"]
+    scheme = server.split("://")[0]
+    host_port = server.split("://")[1]
+    proxy_url = f"{scheme}://{proxy['username']}:{proxy['password']}@{host_port}/"
+    proxies = {"http": proxy_url, "https": proxy_url}
+
+    # Direct IP
+    direct_ip = None
+    try:
+        direct_ip = req.get("http://api.ipify.org?format=json", timeout=_PROXY_TIMEOUT).json().get("ip")
+    except Exception:
+        pass
+
+    # Exit IP via proxy
+    exit_ip = None
+    ip_error = None
+    try:
+        r = req.get("http://api.ipify.org?format=json", proxies=proxies, timeout=_PROXY_TIMEOUT)
+        if r.status_code == 200:
+            exit_ip = r.json().get("ip")
+        else:
+            ip_error = f"HTTP {r.status_code}"
+    except Exception as e:
+        ip_error = str(e)
+
+    # Amazon reachability
+    amazon_status = None
+    amazon_error = None
+    try:
+        r = req.get(
+            "http://www.amazon.com/robots.txt",
+            proxies=proxies,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=_PROXY_TIMEOUT,
+            allow_redirects=True,
+        )
+        amazon_status = r.status_code
+    except Exception as e:
+        amazon_error = str(e)
+
+    proxy_routing = exit_ip is not None and exit_ip != direct_ip
+    amazon_ok = amazon_status == 200
+    ok = proxy_routing and amazon_ok
+
+    return {
+        "ok": ok,
+        "username": proxy["username"],
+        "direct_ip": direct_ip,
+        "exit_ip": exit_ip,
+        "ip_error": ip_error,
+        "proxy_routing": proxy_routing,
+        "amazon_status": amazon_status,
+        "amazon_error": amazon_error,
+    }
+
+
+async def _check_proxy() -> dict:
+    return await asyncio.to_thread(_proxy_check_sync)
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -84,14 +153,18 @@ async def run_health_check() -> dict:
     logger.info("Health check starting — %d ASINs, %d keywords", len(asins), len(keywords))
 
     tasks = (
+        [_check_proxy()] +
         [_check_keyword(kw) for kw in keywords] +
         [_check_asin(asin) for asin in asins]
     )
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    proxy_result = results[0] if not isinstance(results[0], Exception) else {"ok": False, "error": str(results[0])}
+    scraper_results = results[1:]
+
     keyword_results = []
     asin_results = []
-    for i, r in enumerate(results):
+    for i, r in enumerate(scraper_results):
         if isinstance(r, Exception):
             if i < len(keywords):
                 keyword_results.append({"keyword": keywords[i], "ok": False, "error": str(r)})
@@ -102,10 +175,11 @@ async def run_health_check() -> dict:
         else:
             asin_results.append(r)
 
-    all_ok = all(r.get("ok") for r in keyword_results + asin_results)
+    all_ok = proxy_result.get("ok") and all(r.get("ok") for r in keyword_results + asin_results)
     total_duration = round(time.monotonic() - t0, 2)
 
     details = {
+        "proxy": proxy_result,
         "keywords": keyword_results,
         "asins": asin_results,
     }

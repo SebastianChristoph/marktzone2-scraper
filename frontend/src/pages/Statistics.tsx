@@ -303,15 +303,31 @@ export default function Statistics() {
           </Box>
 
           {/* Detailed timing table */}
-          <Paper variant="outlined" sx={{ mb: 4 }}>
-            <Table size="small">
+          <Paper variant="outlined" sx={{ mb: 4, overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 480 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>Metrik</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Ø Avg</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>P50</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "warning.main" }}>P95</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "error.main" }}>P99</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>
+                    <Tooltip title="Arithmetischer Mittelwert aller Messungen" placement="top" arrow>
+                      <span style={{ cursor: "help", borderBottom: "1px dashed currentColor" }}>Ø Avg</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>
+                    <Tooltip title="Median — 50 % der Messungen liegen darunter" placement="top" arrow>
+                      <span style={{ cursor: "help", borderBottom: "1px dashed currentColor" }}>P50</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: "warning.main" }}>
+                    <Tooltip title="95. Perzentil — nur 5 % der Messungen dauern länger" placement="top" arrow>
+                      <span style={{ cursor: "help", borderBottom: "1px dashed currentColor" }}>P95</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 700, color: "error.main" }}>
+                    <Tooltip title="99. Perzentil — Worst-Case-Ausreißer (1 % der Messungen)" placement="top" arrow>
+                      <span style={{ cursor: "help", borderBottom: "1px dashed currentColor" }}>P99</span>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: "text.secondary" }}>Min – Max</TableCell>
                 </TableRow>
               </TableHead>
@@ -329,7 +345,7 @@ export default function Statistics() {
       {/* ── Charts row ─────────────────────────────────────────────────── */}
       <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap", mb: 4 }}>
         {/* Jobs per day */}
-        <Paper variant="outlined" sx={{ p: 2.5, flex: 2, minWidth: 280 }}>
+        <Paper variant="outlined" sx={{ p: 2.5, flex: 2, minWidth: { xs: "100%", sm: 280 } }}>
           <Typography variant="subtitle2" fontWeight={700} mb={0.5}>Jobs pro Tag (letzte 14 Tage)</Typography>
           <Typography variant="caption" color="text.secondary" display="block" mb={2}>
             {jobs_per_day.reduce((a, b) => a + b.count, 0)} Jobs total
@@ -384,7 +400,7 @@ export default function Statistics() {
               <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 3 }}>
                 <StatCard
                   label="Letzter Run"
-                  value={last.started_at.slice(0, 10)}
+                  value={last.started_at.slice(0, 10).split("-").reverse().join(".")}
                   sub={last.status}
                   color={last.status === "completed" ? "success.main" : last.status === "failed" ? "error.main" : undefined}
                 />
@@ -403,8 +419,8 @@ export default function Statistics() {
           })()}
 
           {/* History table */}
-          <Paper variant="outlined" sx={{ mb: 4 }}>
-            <Table size="small">
+          <Paper variant="outlined" sx={{ mb: 4, overflowX: "auto" }}>
+            <Table size="small" sx={{ minWidth: 560 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>Datum</TableCell>
@@ -423,7 +439,7 @@ export default function Statistics() {
                   return (
                     <TableRow key={s.session_id}>
                       <TableCell sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                        {s.started_at.slice(0, 16).replace("T", " ")}
+                        {s.started_at.slice(0, 10).split("-").reverse().join(".")} {s.started_at.slice(11, 16)}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -456,8 +472,8 @@ export default function Statistics() {
       {top_clusters.length === 0 ? (
         <Typography variant="body2" color="text.secondary">Noch keine Cluster-Daten.</Typography>
       ) : (
-        <Paper variant="outlined">
-          <Table size="small">
+        <Paper variant="outlined" sx={{ overflowX: "auto" }}>
+          <Table size="small" sx={{ minWidth: 340 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ fontWeight: 700 }}>Cluster ID</TableCell>

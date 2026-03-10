@@ -244,7 +244,7 @@ export default function Logging() {
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
         <Typography variant="h4" fontWeight={700}>Logging</Typography>
         <Chip
           label={`${count24h} Fehler in 24h`}
@@ -252,7 +252,7 @@ export default function Logging() {
           size="small"
           sx={{ ml: 1 }}
         />
-        <Box sx={{ ml: "auto", display: "flex", gap: 1, alignItems: "center" }}>
+        <Box sx={{ ml: "auto", display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
           {isLocal && errors.length > 0 && (
             <Button
               variant="outlined"
@@ -279,7 +279,7 @@ export default function Logging() {
       </Box>
 
       {/* DB source toggle */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1, flexWrap: "wrap" }}>
         <FormControlLabel
           control={<Switch checked={remoteMode} onChange={(e) => toggleRemote(e.target.checked)} size="small" color={remoteMode ? "success" : "default"} />}
           label={<Typography variant="body2" fontWeight={600}>{remoteMode ? "Server (PostgreSQL)" : "Lokal (SQLite)"}</Typography>}

@@ -513,8 +513,8 @@ class ProductScraper:
 
         try:
             for sel in [
-                "#productDetails_feature_div table tr",
                 "#productDetails_detailBullets_sections1 tr",
+                "#productDetails_feature_div table tr",
                 "#productDetails_techSpec_section_1 tr",
             ]:
                 rows = page.query_selector_all(sel)
@@ -526,8 +526,6 @@ class ProductScraper:
                         val = self._inner_text(td)
                         if key and val:
                             info[key] = val
-                if rows:
-                    break
         except Exception as e:
             logger.warning(f"[PS] info_box table: {e}")
 
