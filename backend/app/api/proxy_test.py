@@ -97,13 +97,15 @@ async def run_proxy_test() -> dict:
     base_user = raw["username"]  # e.g. "nbbbwudu-1"
     password = raw["password"]
 
-    # Build the two variants to test
+    # Build variants to test
     parts = base_user.rsplit("-", 1)
-    country_user = f"{parts[0]}-US-{parts[1]}" if len(parts) == 2 else f"{base_user}-US"  # nbbbwudu-US-1 (Webshare format)
+    country_user_upper = f"{parts[0]}-US-{parts[1]}" if len(parts) == 2 else f"{base_user}-US"  # nbbbwudu-US-1
+    country_user_lower = f"{parts[0]}-us-{parts[1]}" if len(parts) == 2 else f"{base_user}-us"  # nbbbwudu-us-1
 
     variants = [
-        _run_variant(server, base_user, password, direct_ip),       # raw
-        _run_variant(server, country_user, password, direct_ip),    # nbbbwudu-US-1
+        _run_variant(server, base_user, password, direct_ip),              # raw
+        _run_variant(server, country_user_upper, password, direct_ip),     # nbbbwudu-US-1 (uppercase)
+        _run_variant(server, country_user_lower, password, direct_ip),     # nbbbwudu-us-1 (lowercase)
     ]
 
     return {

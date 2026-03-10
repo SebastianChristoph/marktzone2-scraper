@@ -269,7 +269,7 @@ export default function Testing() {
           };
 
           const variants = (r.variants ?? []) as Variant[];
-          const variantLabels = ["Raw (kein Suffix)", "nbbbwudu-US-1 (Webshare-Format)"];
+          const variantLabels = ["Raw (kein Suffix)", "nbbbwudu-US-1 (uppercase)", "nbbbwudu-us-1 (lowercase)"];
           const anyOk = variants.some((v) => v.proxy_working && v.amazon_ok);
 
           return (
