@@ -23,8 +23,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 ]
 
-# Retry backoff in seconds: attempt 1→10s, 2→30s (exponential)
-RETRY_BACKOFFS = [10, 30]
+# Retry backoff in seconds: attempt 1→5s, 2→15s, 3→30s, 4→60s
+RETRY_BACKOFFS = [5, 15, 30, 60]
 
 
 class FirstPageScraper:
@@ -35,7 +35,7 @@ class FirstPageScraper:
         return await asyncio.to_thread(self._scrape_sync, keyword, job_id, test_screenshot, country)
 
     def _scrape_sync(self, keyword: str, job_id: Optional[str], test_screenshot: bool = False, country: Optional[str] = None) -> dict:
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot, country)
