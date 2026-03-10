@@ -43,9 +43,9 @@ def get_proxy(country: Optional[str] = None) -> Optional[dict]:
         return None
 
     username = _parsed_base.username  # e.g. "nbbbwudu-1"
-    effective_country = country.lower() if country else None
+    effective_country = (country or "us").lower()
 
-    if effective_country and effective_country in COUNTRY_CODES:
+    if effective_country in COUNTRY_CODES:
         # Split off the session number: "nbbbwudu-1" → base="nbbbwudu", session="1"
         parts = username.rsplit("-", 1)
         if len(parts) == 2:
