@@ -623,20 +623,20 @@ class ProductScraper:
             if parsed and parsed.get("main_category_rank") is not None:
                 return parsed
 
-        # 2) JS-based: walk every <tr>, find the one whose <th> says "Best Sellers Rank"
+        # 2) JS-based: walk every <tr> incl. hidden — use textContent (not innerText) to find collapsed sections
         if page:
             try:
                 bsr_text = page.evaluate("""
                     () => {
                         for (const row of document.querySelectorAll('tr')) {
                             const th = row.querySelector('th');
-                            if (th && th.innerText.replace(/\\u00a0/g, ' ').trim() === 'Best Sellers Rank') {
+                            if (th && th.textContent.replace(/\\u00a0/g, ' ').trim() === 'Best Sellers Rank') {
                                 const td = row.querySelector('td');
-                                return td ? td.innerText : null;
+                                return td ? td.textContent : null;
                             }
                         }
                         const sr = document.getElementById('SalesRank');
-                        return sr ? sr.innerText : null;
+                        return sr ? sr.textContent : null;
                     }
                 """)
                 if bsr_text and "#" in bsr_text:
@@ -646,16 +646,16 @@ class ProductScraper:
             except Exception as e:
                 logger.warning(f"[PS] rank_data js: {e}")
 
-        # 2b) Search rendered body text for "Best Sellers Rank" — plain text, no HTML noise
+        # 2b) Search full body textContent (incl. hidden elements) for "Best Sellers Rank"
         if page:
             try:
-                body_text = page.evaluate("() => document.body.innerText")
+                body_text = page.evaluate("() => document.body.textContent")
                 if body_text and "Best Sellers Rank" in body_text:
                     idx = body_text.index("Best Sellers Rank")
                     vicinity = body_text[idx:idx + 500]
                     parsed = self._parse_bsr_text(vicinity)
                     if parsed and parsed.get("main_category_rank") is not None:
-                        logger.info(f"[PS] rank_data found via body_text search")
+                        logger.info(f"[PS] rank_data found via body textContent")
                         return parsed
             except Exception as e:
                 logger.warning(f"[PS] rank_data body_text: {e}")
