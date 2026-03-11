@@ -23,8 +23,8 @@ USER_AGENTS = [
 ]
 
 RETRY_BACKOFFS = [10, 30]
-# Shorter backoffs for daily batch scraping (proxy rotation > waiting)
-DAILY_RETRY_BACKOFFS = [1, 3]
+# Daily batch: longer backoffs to let proxy recover between retries
+DAILY_RETRY_BACKOFFS = [5, 15]
 
 # Number of US proxy sessions available
 _US_SESSION_COUNT = 10

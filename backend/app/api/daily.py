@@ -23,8 +23,8 @@ from app.db.daily_store import (
 router = APIRouter(prefix="/daily", tags=["daily"])
 logger = logging.getLogger(__name__)
 
-# Shared with jobs.py — 4 concurrent Playwright instances max
-_BROWSER_SEM = asyncio.Semaphore(4)
+# 2 concurrent Playwright instances — reduces simultaneous proxy tunnel load
+_BROWSER_SEM = asyncio.Semaphore(2)
 
 # ── Request / Response models ─────────────────────────────────────────────────
 
@@ -83,6 +83,9 @@ async def _scrape_market(keyword: str) -> tuple[str, list[str], list[str]]:
 
 async def _scrape_product(asin: str) -> tuple[dict | None, str | None]:
     """Scrape a single product page. Returns (result, error_type). error_type is None on success."""
+    import random
+    # Stagger: wait 1–5s before competing for the semaphore to avoid tunnel collisions
+    await asyncio.sleep(random.uniform(1.0, 5.0))
     try:
         async with _BROWSER_SEM:
             scraper = ProductScraper(headless=True, retry_backoffs=DAILY_RETRY_BACKOFFS)
