@@ -22,7 +22,7 @@ from app.db.health_store import get_config, set_config, save_check, get_latest_c
 router = APIRouter(prefix="/health-monitor", tags=["health-monitor"])
 logger = logging.getLogger(__name__)
 
-_CHECK_INTERVAL_S = 5 * 3600  # 5 hours
+_CHECK_INTERVAL_S = 12 * 3600  # 2x per day
 _PRODUCT_REQUIRED_FIELDS = ["title", "price", "ratings", "avg_rating"]
 _MIN_FIRST_PAGE_ASINS = 5
 
