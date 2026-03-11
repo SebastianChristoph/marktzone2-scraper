@@ -23,11 +23,17 @@ USER_AGENTS = [
 ]
 
 RETRY_BACKOFFS = [10, 30]
+# Shorter backoffs for daily batch scraping (proxy rotation > waiting)
+DAILY_RETRY_BACKOFFS = [1, 3]
+
+# Number of US proxy sessions available
+_US_SESSION_COUNT = 10
 
 
 class ProductScraper:
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, retry_backoffs: Optional[list] = None):
         self.headless = headless
+        self.retry_backoffs = retry_backoffs if retry_backoffs is not None else RETRY_BACKOFFS
 
     async def scrape(self, asin: str, job_id: Optional[str] = None, test_screenshot: bool = False) -> Optional[dict]:
         return await asyncio.to_thread(self._scrape_sync, asin, job_id, test_screenshot)
@@ -35,9 +41,13 @@ class ProductScraper:
     def _scrape_sync(self, asin: str, job_id: Optional[str], test_screenshot: bool = False) -> Optional[dict]:
         max_retries = 3
         last_error: Optional[str] = None
+        # Pre-generate distinct proxy sessions for all attempts (#5: session diversity)
+        base_session = random.randint(0, _US_SESSION_COUNT - 1)
+        sessions = [(base_session + i) % _US_SESSION_COUNT + 1 for i in range(max_retries)]
         for attempt in range(max_retries):
             try:
-                result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot, use_proxy=True)
+                result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot,
+                                                use_proxy=True, session_num=sessions[attempt])
                 if result:
                     return result
                 logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
@@ -45,7 +55,7 @@ class ProductScraper:
                 last_error = str(e)
                 logger.error(f"[PS] Attempt {attempt + 1} failed for {asin}: {e}")
             if attempt < max_retries - 1:
-                backoff = RETRY_BACKOFFS[attempt] if attempt < len(RETRY_BACKOFFS) else 60
+                backoff = self.retry_backoffs[attempt] if attempt < len(self.retry_backoffs) else self.retry_backoffs[-1]
                 logger.info(f"[PS] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
 
@@ -60,12 +70,13 @@ class ProductScraper:
         )
         return None
 
-    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False, use_proxy: bool = False) -> Optional[dict]:
+    def _scrape_once_sync(self, asin: str, job_id: Optional[str], attempt: int, test_screenshot: bool = False,
+                          use_proxy: bool = False, session_num: Optional[int] = None) -> Optional[dict]:
         user_agent = random.choice(USER_AGENTS)
         url = f"https://www.amazon.com/dp/{asin}?language=en_US"
-        proxy = get_proxy() if use_proxy else None
+        proxy = get_proxy(session_num=session_num) if use_proxy else None
         if proxy:
-            logger.info(f"[PS] Using proxy for {asin}: {proxy['server']}")
+            logger.info(f"[PS] Using proxy for {asin}: {proxy['server']} (session {session_num})")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(

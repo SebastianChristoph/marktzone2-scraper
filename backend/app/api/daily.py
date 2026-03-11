@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.scrapers.first_page_scraper import FirstPageScraper
-from app.scrapers.product_scraper import ProductScraper
+from app.scrapers.product_scraper import ProductScraper, DAILY_RETRY_BACKOFFS
+from app.scrapers.proxy_manager import check_proxy
 from app.api.security import require_scraper_secret
 from app.db.error_log import log_error
 from app.db.daily_store import (
@@ -84,25 +85,14 @@ async def _scrape_product(asin: str) -> dict | None:
     """Scrape a single product page. Returns product dict or None on error."""
     try:
         async with _BROWSER_SEM:
-            scraper = ProductScraper(headless=True)
+            # #2: short backoffs for daily batch — proxy rotation is more effective than waiting
+            scraper = ProductScraper(headless=True, retry_backoffs=DAILY_RETRY_BACKOFFS)
             result = await scraper.scrape(asin)
         if result is None:
-            log_error(
-                scraper_type="product",
-                context=asin,
-                error_type="no_result",
-                error_message="Scraper returned None after all retries",
-                url=f"https://www.amazon.com/dp/{asin}?language=en_US",
-            )
+            # product_scraper already logged scrape_failed — no double log here (#4)
             return None
         if "error" in result:
-            log_error(
-                scraper_type="product",
-                context=asin,
-                error_type=str(result["error"]),
-                error_message=f"Scraper returned error result: {result['error']}",
-                url=f"https://www.amazon.com/dp/{asin}?language=en_US",
-            )
+            # product_scraper already logged the specific error (out_of_stock etc.) — no double log (#4)
             return None
         return result
     except Exception as e:
@@ -125,8 +115,16 @@ async def start_daily_session() -> dict:
     try:
         session_id = start_session()
         logger.info(f"[Daily] Session started: {session_id}")
-        log_daily_event(session_id, "Daily Session gestartet", phase="market_discovery")
-        return {"session_id": session_id}
+        # #6: Proxy health check before committing to a full run
+        proxy_ok = await asyncio.to_thread(check_proxy)
+        if proxy_ok:
+            log_daily_event(session_id, "Daily Session gestartet — Proxy OK", phase="market_discovery")
+        else:
+            log_daily_event(session_id,
+                "Daily Session gestartet — ⚠️ PROXY HEALTH CHECK FEHLGESCHLAGEN. "
+                "Scraping könnte vollständig scheitern!",
+                level="warning", phase="market_discovery")
+        return {"session_id": session_id, "proxy_ok": proxy_ok}
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -190,13 +188,26 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
 
     results = [r for r in raw_results if r is not None]
     errors = len(req.asins) - len(results)
+    error_rate = errors / len(req.asins) if req.asins else 0
 
-    log_daily_event(
-        req.session_id,
-        f"ASIN-Batch: {len(results)}/{len(req.asins)} OK, {errors} Fehler",
-        level="info" if errors == 0 else ("warning" if errors < len(req.asins) else "error"),
-        phase="product_scraping",
-    )
+    # #3: Detect proxy blockade — abort if ≥ 70% of batch failed
+    aborted = False
+    if error_rate >= 1.0:
+        msg = (f"ASIN-Batch: 0/{len(req.asins)} OK — VOLLSTÄNDIGE BLOCKADE erkannt "
+               f"(100% Fehler). Session wird abgebrochen.")
+        log_daily_event(req.session_id, msg, level="error", phase="product_scraping")
+        aborted = True
+    elif error_rate >= 0.7:
+        msg = (f"ASIN-Batch: {len(results)}/{len(req.asins)} OK — HOHE FEHLERRATE "
+               f"({error_rate:.0%}). Mögliche Proxy-Blockade.")
+        log_daily_event(req.session_id, msg, level="error", phase="product_scraping")
+    else:
+        log_daily_event(
+            req.session_id,
+            f"ASIN-Batch: {len(results)}/{len(req.asins)} OK, {errors} Fehler",
+            level="info" if errors == 0 else "warning",
+            phase="product_scraping",
+        )
 
     try:
         session = get_current_session()
@@ -209,8 +220,8 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
     except Exception:
         pass
 
-    logger.info(f"[Daily] Products done: {len(results)}/{len(req.asins)}, errors: {errors}")
-    return {"results": results}
+    logger.info(f"[Daily] Products done: {len(results)}/{len(req.asins)}, errors: {errors}, aborted: {aborted}")
+    return {"results": results, "aborted": aborted}
 
 
 @router.post("/session/complete", dependencies=[Depends(require_scraper_secret)])

@@ -36,9 +36,10 @@ def _init() -> None:
         logger.warning(f"[Proxy] Failed to parse WEBSHARE_PROXY_URL: {e} — running without proxy")
 
 
-def get_proxy(country: Optional[str] = None) -> Optional[dict]:
+def get_proxy(country: Optional[str] = None, session_num: Optional[int] = None) -> Optional[dict]:
     """Return the Playwright proxy dict, or None if not configured.
     Pass country='us'/'de'/'fr' to target a specific exit country.
+    Pass session_num to pin a specific session (1-based); None = random.
     Webshare format: base-COUNTRY-session  (e.g. nbbbwudu-US-1)
     No country → raw username (no suffix).
     """
@@ -50,9 +51,10 @@ def get_proxy(country: Optional[str] = None) -> Optional[dict]:
     effective_country = (country or "us").lower()
 
     if effective_country in COUNTRY_CODES:
-        # Pick a random session number from the available pool
         max_sessions = SESSION_COUNT.get(effective_country, 1)
-        session = random.randint(1, max_sessions)
+        session = session_num if session_num is not None else random.randint(1, max_sessions)
+        # Clamp to valid range
+        session = max(1, min(session, max_sessions))
         parts = username.rsplit("-", 1)
         base = parts[0] if len(parts) == 2 else username
         username = f"{base}-{COUNTRY_CODES[effective_country]}-{session}"
@@ -63,3 +65,25 @@ def get_proxy(country: Optional[str] = None) -> Optional[dict]:
         "username": username,
         "password": _parsed_base.password,
     }
+
+
+def check_proxy() -> bool:
+    """Quick health check: verify proxy can reach the internet. Returns True if OK."""
+    _init()
+    if _parsed_base is None:
+        logger.info("[Proxy] No proxy configured — skipping health check")
+        return True
+    try:
+        import urllib.request
+        proxy = get_proxy(session_num=1)
+        if proxy is None:
+            return True
+        proxy_url = f"{proxy['server'].replace('://', f'://{proxy[\"username\"]}:{proxy[\"password\"]}@')}"
+        req = urllib.request.Request("http://httpbin.org/ip", headers={"User-Agent": "Mozilla/5.0"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+        opener.open(req, timeout=10)
+        logger.info("[Proxy] Health check OK")
+        return True
+    except Exception as e:
+        logger.warning(f"[Proxy] Health check FAILED: {e}")
+        return False
