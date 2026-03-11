@@ -78,7 +78,7 @@ def check_proxy() -> bool:
         proxy = get_proxy(session_num=1)
         if proxy is None:
             return True
-        proxy_url = f"{proxy['server'].replace('://', f'://{proxy[\"username\"]}:{proxy[\"password\"]}@')}"
+        proxy_url = proxy['server'].replace('://', f"://{proxy['username']}:{proxy['password']}@")
         req = urllib.request.Request("http://httpbin.org/ip", headers={"User-Agent": "Mozilla/5.0"})
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
         opener.open(req, timeout=10)
