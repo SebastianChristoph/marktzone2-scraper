@@ -114,6 +114,9 @@ class ProductScraper:
             """)
             try:
                 page = context.new_page()
+                page.route("**/*", lambda route: route.abort()
+                    if route.request.resource_type in ("image", "stylesheet", "font", "media")
+                    else route.continue_())
                 logger.info(f"[PS] GET {url}")
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 time.sleep(random.uniform(1.0, 2.0))

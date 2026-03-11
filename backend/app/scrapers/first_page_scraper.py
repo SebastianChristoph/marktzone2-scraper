@@ -131,6 +131,9 @@ class FirstPageScraper:
             """)
             try:
                 page = context.new_page()
+                page.route("**/*", lambda route: route.abort()
+                    if route.request.resource_type in ("image", "stylesheet", "font", "media")
+                    else route.continue_())
 
                 logger.info(f"[FP] GET {url}")
                 try:
