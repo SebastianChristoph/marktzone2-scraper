@@ -46,6 +46,7 @@ export default function Testing() {
   // Real product scraper
   const [productAsin, setProductAsin] = useState("");
   const [productHeadless, setProductHeadless] = useState(true);
+  const [productUseProxy, setProductUseProxy] = useState(false);
   const [productLoading, setProductLoading] = useState(false);
   const [productResult, setProductResult] = useState<unknown>(null);
   const [productError, setProductError] = useState<string | null>(null);
@@ -93,7 +94,7 @@ export default function Testing() {
       const res = await fetch("/api/scraper/product", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asin: productAsin.trim(), headless: productHeadless, test_screenshot: true }),
+        body: JSON.stringify({ asin: productAsin.trim(), headless: productHeadless, test_screenshot: true, use_proxy: productUseProxy }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setProductResult(await res.json());
@@ -466,6 +467,18 @@ export default function Testing() {
             sx={{ mb: 1 }}
           />
         )}
+        <FormControlLabel
+          control={
+            <Switch
+              checked={productUseProxy}
+              onChange={(e) => setProductUseProxy(e.target.checked)}
+              disabled={productLoading}
+              size="small"
+            />
+          }
+          label={<Typography variant="caption">Proxy verwenden (erzwingt einzelnen Versuch)</Typography>}
+          sx={{ mb: 1 }}
+        />
         {productDuration !== null && (
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
             Dauer: <strong>{productDuration.toFixed(2)}s</strong>

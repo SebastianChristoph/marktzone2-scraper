@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -32,6 +34,7 @@ class ProductRequest(BaseModel):
     asin: str
     headless: bool = True
     test_screenshot: bool = False
+    use_proxy: bool | None = None  # None = normal retry logic; True/False = forced single attempt
 
 
 @router.post("/first-page", response_model=FirstPageResponse)
@@ -52,7 +55,13 @@ async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
 @router.post("/product")
 async def scrape_product(request: ProductRequest):
     scraper = ProductScraper(headless=request.headless)
-    result = await scraper.scrape(request.asin, test_screenshot=request.test_screenshot)
+    if request.use_proxy is not None:
+        result = await asyncio.to_thread(
+            scraper._scrape_once_sync,
+            request.asin, None, 1, request.test_screenshot, request.use_proxy,
+        )
+    else:
+        result = await scraper.scrape(request.asin, test_screenshot=request.test_screenshot)
     if result is None:
         return {"asin": request.asin, "error": "scrape_failed"}
     return result
