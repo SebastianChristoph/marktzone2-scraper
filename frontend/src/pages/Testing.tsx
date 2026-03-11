@@ -474,6 +474,12 @@ export default function Testing() {
         {productError && <Typography color="error" variant="body2" mb={1}>Fehler: {productError}</Typography>}
         {productResult && (
           <Box>
+            <Box sx={{ mb: 1.5 }}>
+              <a href={`https://www.amazon.com/dp/${productAsin.trim()}`} target="_blank" rel="noopener noreferrer"
+                style={{ fontSize: "0.82rem", fontFamily: "monospace" }}>
+                amazon.com/dp/{productAsin.trim()}
+              </a>
+            </Box>
             <JsonBox data={productResult} />
             {(productResult as any).test_screenshot && (
               <Box mt={2}>
