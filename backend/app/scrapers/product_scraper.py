@@ -538,6 +538,7 @@ class ProductScraper:
                 "#productDetails_feature_div table tr",
                 "#productDetails_techSpec_section_1 tr",
                 "#productDetails_techSpec_section_2 tr",
+                "#productDetails_db_sections tr",
             ]:
                 rows = page.query_selector_all(sel)
                 for row in rows:
