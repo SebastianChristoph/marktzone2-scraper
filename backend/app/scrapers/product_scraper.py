@@ -42,48 +42,37 @@ class ProductScraper:
     def _scrape_sync(self, asin: str, job_id: Optional[str], test_screenshot: bool = False) -> Optional[dict]:
         max_retries = 3
         last_error: Optional[str] = None
-
-        # Phase 1: try without proxy
+        # Pre-generate distinct proxy sessions for all attempts (session diversity)
+        base_session = random.randint(0, _US_SESSION_COUNT - 1)
+        sessions = [(base_session + i) % _US_SESSION_COUNT + 1 for i in range(max_retries)]
         for attempt in range(max_retries):
+            wait_if_tripped()
             try:
                 result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot,
-                                                use_proxy=False)
+                                                use_proxy=True, session_num=sessions[attempt])
                 if result:
                     return result
-                logger.warning(f"[PS] No data on attempt {attempt + 1} (no proxy) for {asin}")
+                logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"[PS] Attempt {attempt + 1} (no proxy) failed for {asin}: {e}")
+                if "ERR_TUNNEL_CONNECTION_FAILED" in last_error:
+                    trip()
+                    logger.warning(f"[PS] Proxy tunnel down on attempt {attempt + 1} for {asin}, circuit tripped")
+                else:
+                    logger.error(f"[PS] Attempt {attempt + 1} failed for {asin}: {e}")
             if attempt < max_retries - 1:
                 backoff = self.retry_backoffs[attempt] if attempt < len(self.retry_backoffs) else self.retry_backoffs[-1]
                 logger.info(f"[PS] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
 
-        # Phase 2: one final attempt with proxy
-        logger.info(f"[PS] All {max_retries} direct attempts failed for {asin} — retrying with proxy")
-        wait_if_tripped()
-        session_num = random.randint(1, _US_SESSION_COUNT)
-        try:
-            result = self._scrape_once_sync(asin, job_id, max_retries + 1, test_screenshot,
-                                            use_proxy=True, session_num=session_num)
-            if result:
-                return result
-        except Exception as e:
-            last_error = str(e)
-            if "ERR_TUNNEL_CONNECTION_FAILED" in last_error:
-                trip()
-                logger.warning(f"[PS] Proxy tunnel down on proxy fallback for {asin}, circuit tripped")
-            else:
-                logger.error(f"[PS] Proxy fallback failed for {asin}: {e}")
-
         log_error(
             scraper_type="product",
             context=asin,
             error_type="scrape_failed",
-            error_message=f"All {max_retries} direct + 1 proxy attempt exhausted: {last_error}",
+            error_message=f"All {max_retries} proxy retries exhausted: {last_error}",
             url=f"https://www.amazon.com/dp/{asin}?language=en_US",
             job_id=job_id,
-            attempt=max_retries + 1,
+            attempt=max_retries,
         )
         return None
 
