@@ -16,6 +16,7 @@ from app.db.error_log import log_error
 from app.db.daily_store import (
     start_session, update_session, complete_session,
     get_current_session, get_running_session, get_history, clear_history,
+    log_daily_event, get_daily_log,
 )
 
 router = APIRouter(prefix="/daily", tags=["daily"])
@@ -47,6 +48,13 @@ class CompleteSessionRequest(BaseModel):
     asins_done: int = 0
     asins_errors: int = 0
     total_duration_s: float = 0.0
+
+
+class LogEntryRequest(BaseModel):
+    session_id: str
+    message: str
+    level: str = "info"  # info | warning | error
+    phase: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -117,6 +125,7 @@ async def start_daily_session() -> dict:
     try:
         session_id = start_session()
         logger.info(f"[Daily] Session started: {session_id}")
+        log_daily_event(session_id, "Daily Session gestartet", phase="market_discovery")
         return {"session_id": session_id}
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -138,10 +147,20 @@ async def scrape_markets(req: ScrapeMarketsRequest) -> dict:
     errors = 0
     for keyword, asins, suggestions in results_raw:
         results[keyword] = {"asins": asins, "suggestions": suggestions}
-        if not asins:
+        if asins:
+            log_daily_event(req.session_id, f"'{keyword}' → {len(asins)} ASINs", phase="market_discovery")
+        else:
             errors += 1
+            log_daily_event(req.session_id, f"'{keyword}' → 0 ASINs (Fehler)", level="warning", phase="market_discovery")
 
     done_so_far = len(req.markets)
+    log_daily_event(
+        req.session_id,
+        f"Märkte-Batch: {done_so_far - errors}/{done_so_far} OK, {errors} Fehler",
+        level="info" if errors == 0 else "warning",
+        phase="market_discovery",
+    )
+
     try:
         session = get_current_session()
         if session:
@@ -171,6 +190,13 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
 
     results = [r for r in raw_results if r is not None]
     errors = len(req.asins) - len(results)
+
+    log_daily_event(
+        req.session_id,
+        f"ASIN-Batch: {len(results)}/{len(req.asins)} OK, {errors} Fehler",
+        level="info" if errors == 0 else ("warning" if errors < len(req.asins) else "error"),
+        phase="product_scraping",
+    )
 
     try:
         session = get_current_session()
@@ -202,6 +228,24 @@ async def finish_daily_session(req: CompleteSessionRequest) -> dict:
         asins_done=req.asins_done,
         asins_errors=req.asins_errors,
     )
+
+    dur = req.total_duration_s
+    hours = int(dur // 3600)
+    mins = int((dur % 3600) // 60)
+    dur_str = f"{hours}h {mins}min" if hours else f"{mins}min"
+    summary = (
+        f"Session abgeschlossen [{req.status.upper()}]: "
+        f"{req.products_new} neu, {req.products_updated} aktualisiert, "
+        f"{req.markets_changed} Märkte geändert | "
+        f"{req.asins_done} ASINs, {req.asins_errors} Fehler | "
+        f"Dauer: {dur_str}"
+    )
+    log_daily_event(
+        req.session_id, summary,
+        level="info" if req.status == "completed" else "error",
+        phase="done",
+    )
+
     logger.info(f"[Daily] Session {req.session_id[:8]} completed with status={req.status}")
     return {"ok": True}
 
@@ -213,6 +257,18 @@ async def update_phase(session_id: str, phase: str, asins_total: int | None = No
     if asins_total is not None:
         kwargs["asins_total"] = asins_total
     update_session(session_id, **kwargs)
+
+    phase_labels = {
+        "market_discovery": "Markt-Discovery",
+        "product_scraping": "ASIN-Scraping",
+        "aggregation": "Aggregation",
+        "finalization": "Finalisierung",
+        "done": "Abgeschlossen",
+    }
+    label = phase_labels.get(phase, phase)
+    msg = f"Phase: {label} ({asins_total} ASINs)" if asins_total else f"Phase: {label}"
+    log_daily_event(session_id, msg, phase=phase)
+
     return {"ok": True}
 
 
@@ -233,7 +289,20 @@ async def daily_history() -> dict:
 
 @router.delete("/history")
 async def delete_daily_history() -> dict:
-    """Delete all completed/failed daily sessions."""
+    """Delete all completed/failed daily sessions and their log entries."""
     deleted = clear_history()
     logger.info(f"[Daily] Deleted {deleted} sessions from history")
     return {"ok": True, "deleted": deleted}
+
+
+@router.get("/log")
+async def get_log(session_id: str | None = None, limit: int = 500) -> dict:
+    """Return structured log entries for a daily session."""
+    return {"entries": get_daily_log(session_id=session_id, limit=limit)}
+
+
+@router.post("/log", dependencies=[Depends(require_scraper_secret)])
+async def push_log_entry(req: LogEntryRequest) -> dict:
+    """Allow external callers (e.g. marktzone backend) to push log entries."""
+    log_daily_event(req.session_id, req.message, level=req.level, phase=req.phase)
+    return {"ok": True}

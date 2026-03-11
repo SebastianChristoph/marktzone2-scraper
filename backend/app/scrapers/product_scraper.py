@@ -37,7 +37,7 @@ class ProductScraper:
         last_error: Optional[str] = None
         for attempt in range(max_retries):
             try:
-                result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot)
+                result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot, use_proxy=True)
                 if result:
                     return result
                 logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
@@ -49,25 +49,14 @@ class ProductScraper:
                 logger.info(f"[PS] Waiting {backoff}s before retry...")
                 time.sleep(backoff)
 
-        # All direct attempts failed — try once more with proxy as fallback
-        logger.info(f"[PS] All {max_retries} direct attempts failed for {asin} — retrying with proxy")
-        try:
-            result = self._scrape_once_sync(asin, job_id, max_retries + 1, test_screenshot, use_proxy=True)
-            if result:
-                logger.info(f"[PS] Proxy fallback succeeded for {asin}")
-                return result
-        except Exception as e:
-            last_error = str(e)
-            logger.error(f"[PS] Proxy fallback also failed for {asin}: {e}")
-
         log_error(
             scraper_type="product",
             context=asin,
             error_type="scrape_failed",
-            error_message=f"All {max_retries} retries + proxy fallback exhausted: {last_error}",
+            error_message=f"All {max_retries} proxy retries exhausted: {last_error}",
             url=f"https://www.amazon.com/dp/{asin}?language=en_US",
             job_id=job_id,
-            attempt=max_retries + 1,
+            attempt=max_retries,
         )
         return None
 
@@ -76,7 +65,7 @@ class ProductScraper:
         url = f"https://www.amazon.com/dp/{asin}?language=en_US"
         proxy = get_proxy() if use_proxy else None
         if proxy:
-            logger.info(f"[PS] Using proxy fallback for {asin}: {proxy['server']}")
+            logger.info(f"[PS] Using proxy for {asin}: {proxy['server']}")
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -188,7 +177,7 @@ class ProductScraper:
                 manufacturer = self._get_manufacturer(product_info_box, technical_details)
                 variants = self._get_variants(page)
 
-                rank_data = self._get_rank_data(product_info_box)
+                rank_data = self._get_rank_data(product_info_box, page)
                 main_category = rank_data.get("main_category")
                 second_category = rank_data.get("second_category")
 
@@ -514,8 +503,10 @@ class ProductScraper:
         try:
             for sel in [
                 "#productDetails_detailBullets_sections1 tr",
+                "#productDetails_detailBullets_sections2 tr",
                 "#productDetails_feature_div table tr",
                 "#productDetails_techSpec_section_1 tr",
+                "#productDetails_techSpec_section_2 tr",
             ]:
                 rows = page.query_selector_all(sel)
                 for row in rows:
@@ -528,6 +519,29 @@ class ProductScraper:
                             info[key] = val
         except Exception as e:
             logger.warning(f"[PS] info_box table: {e}")
+
+        # Fallback: scan every <tr> on the page via JS — catches any layout variant
+        if not info:
+            try:
+                js_info = page.evaluate("""
+                    () => {
+                        const result = {};
+                        for (const row of document.querySelectorAll('tr')) {
+                            const th = row.querySelector('th');
+                            const td = row.querySelector('td');
+                            if (th && td) {
+                                const key = th.innerText.replace(/\\u00a0/g, ' ').trim();
+                                const val = td.innerText.replace(/\\u00a0/g, ' ').trim();
+                                if (key && val) result[key] = val;
+                            }
+                        }
+                        return result;
+                    }
+                """)
+                if js_info:
+                    info.update(js_info)
+            except Exception as e:
+                logger.warning(f"[PS] info_box js fallback: {e}")
 
         return info
 
@@ -559,12 +573,72 @@ class ProductScraper:
             logger.warning(f"[PS] technical_details: {e}")
         return info
 
-    def _get_rank_data(self, info_box: dict) -> dict:
+    def _get_rank_data(self, info_box: dict, page: Optional[Page] = None) -> dict:
         empty = {"main_category": None, "main_category_rank": None,
                  "second_category": None, "second_category_rank": None}
-        rank_text = info_box.get("Best Sellers Rank")
-        if not rank_text:
-            return empty
+
+        # 1) info_box lookup with normalized key (handles \u00a0, extra whitespace)
+        rank_text = None
+        for key in info_box:
+            if key.replace("\u00a0", " ").strip() == "Best Sellers Rank":
+                rank_text = info_box[key]
+                break
+        if rank_text:
+            parsed = self._parse_bsr_text(rank_text)
+            if parsed and parsed.get("main_category_rank") is not None:
+                return parsed
+
+        # 2) JS-based: walk every <tr>, find the one whose <th> says "Best Sellers Rank"
+        if page:
+            try:
+                bsr_text = page.evaluate("""
+                    () => {
+                        for (const row of document.querySelectorAll('tr')) {
+                            const th = row.querySelector('th');
+                            if (th && th.innerText.replace(/\\u00a0/g, ' ').trim() === 'Best Sellers Rank') {
+                                const td = row.querySelector('td');
+                                return td ? td.innerText : null;
+                            }
+                        }
+                        const sr = document.getElementById('SalesRank');
+                        return sr ? sr.innerText : null;
+                    }
+                """)
+                if bsr_text and "#" in bsr_text:
+                    parsed = self._parse_bsr_text(bsr_text)
+                    if parsed and parsed.get("main_category_rank") is not None:
+                        return parsed
+            except Exception as e:
+                logger.warning(f"[PS] rank_data js: {e}")
+
+        # 3) Last-resort: regex on raw page HTML — normalize &nbsp; entities
+        if page:
+            try:
+                content = page.content().replace("&nbsp;", " ").replace("\xa0", " ")
+                bsr_section = re.search(
+                    r"Best\s+Sellers?\s+Rank.*?(?=#\d)",
+                    content, re.IGNORECASE | re.DOTALL
+                )
+                search_text = content[bsr_section.start():bsr_section.start() + 600] if bsr_section else content
+                matches = re.findall(r"#([\d,]+)\s+in\s+([A-Za-z][^<\n#(]{2,60}?)(?=\s*[<\n(#])", search_text)
+                if matches:
+                    main_rank = self._parse_rank_int(matches[0][0])
+                    main_cat = re.sub(r"\s+", " ", matches[0][1]).strip() or None
+                    second_rank = self._parse_rank_int(matches[1][0]) if len(matches) > 1 else None
+                    second_cat = re.sub(r"\s+", " ", matches[1][1]).strip() if len(matches) > 1 else None
+                    if main_rank is not None:
+                        return {
+                            "main_category": main_cat,
+                            "main_category_rank": main_rank,
+                            "second_category": second_cat,
+                            "second_category_rank": second_rank,
+                        }
+            except Exception as e:
+                logger.warning(f"[PS] rank_data content: {e}")
+
+        return empty
+
+    def _parse_bsr_text(self, rank_text: str) -> Optional[dict]:
         try:
             rank_items = rank_text.split("#")[1:]
             main_rank = main_cat = second_rank = second_cat = None
@@ -573,13 +647,15 @@ class ProductScraper:
                 parts = rank_items[0].split(" in ", 1)
                 if len(parts) == 2:
                     main_rank = self._parse_rank_int(parts[0])
-                    main_cat = re.sub(r"\s*\([^)]*\)", "", parts[1]).strip()
+                    raw = re.sub(r"\s*\([^)]*\)", "", parts[1])
+                    main_cat = re.sub(r"\s+", " ", raw.replace("\n", " ")).strip() or None
 
             if len(rank_items) > 1:
                 parts = rank_items[1].split(" in ", 1)
                 if len(parts) == 2:
                     second_rank = self._parse_rank_int(parts[0])
-                    second_cat = re.sub(r"\s*\([^)]*\)", "", parts[1]).strip()
+                    raw = re.sub(r"\s*\([^)]*\)", "", parts[1])
+                    second_cat = re.sub(r"\s+", " ", raw.replace("\n", " ")).strip() or None
 
             return {
                 "main_category": main_cat,
@@ -588,8 +664,8 @@ class ProductScraper:
                 "second_category_rank": second_rank,
             }
         except Exception as e:
-            logger.warning(f"[PS] rank_data: {e}")
-            return empty
+            logger.warning(f"[PS] parse_bsr_text: {e}")
+            return None
 
     def _parse_rank_int(self, text: str) -> Optional[int]:
         try:

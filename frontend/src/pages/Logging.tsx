@@ -108,6 +108,38 @@ function formatTime(iso: string) {
   return d.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "medium" });
 }
 
+interface DailyLogEntry {
+  id: number;
+  session_id: string;
+  timestamp: string;
+  level: string;
+  phase: string | null;
+  message: string;
+}
+
+interface DailySession {
+  session_id: string;
+  started_at: string;
+  status: string;
+  asins_done: number;
+  asins_errors: number;
+  markets_done: number;
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  market_discovery: "Markt-Discovery",
+  product_scraping: "ASIN-Scraping",
+  aggregation: "Aggregation",
+  finalization: "Finalisierung",
+  done: "Abgeschlossen",
+};
+
+const LEVEL_COLORS: Record<string, "error" | "warning" | "info" | "success" | "default"> = {
+  error: "error",
+  warning: "warning",
+  info: "default",
+};
+
 export default function Logging() {
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
   const [count24h, setCount24h] = useState(0);
@@ -115,6 +147,11 @@ export default function Logging() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [retryAllProgress, setRetryAllProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // Daily log state
+  const [dailySessions, setDailySessions] = useState<DailySession[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string>("");
+  const [dailyLog, setDailyLog] = useState<DailyLogEntry[]>([]);
 
   // Per-row states (in-memory mirror of localStorage)
   const [rowStates, setRowStates] = useState<Record<number, RowState>>({});
@@ -172,6 +209,45 @@ export default function Logging() {
     const id = setInterval(fetchLogs, 5000);
     return () => clearInterval(id);
   }, [fetchLogs]);
+
+  // Fetch daily sessions for dropdown
+  const fetchDailySessions = useCallback(async () => {
+    const base = remoteMode && remoteUrl ? remoteUrl : "/api";
+    try {
+      const res = await fetch(`${base}/daily/history`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const sessions: DailySession[] = data.sessions ?? [];
+      setDailySessions(sessions);
+      // Auto-select most recent session
+      setSelectedSession((prev) => prev || (sessions[0]?.session_id ?? ""));
+    } catch { /* backend not ready */ }
+  }, [remoteMode, remoteUrl]);
+
+  // Fetch daily log entries
+  const fetchDailyLog = useCallback(async () => {
+    const base = remoteMode && remoteUrl ? remoteUrl : "/api";
+    const params = selectedSession ? `?session_id=${selectedSession}` : "";
+    try {
+      const res = await fetch(`${base}/daily/log${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setDailyLog(data.entries ?? []);
+    } catch { /* backend not ready */ }
+  }, [remoteMode, remoteUrl, selectedSession]);
+
+  useEffect(() => {
+    fetchDailySessions();
+  }, [fetchDailySessions]);
+
+  useEffect(() => {
+    fetchDailyLog();
+    const currentSession = dailySessions.find((s) => s.session_id === selectedSession);
+    const isRunning = currentSession?.status === "running";
+    if (!isRunning) return;
+    const id = setInterval(fetchDailyLog, 5000);
+    return () => clearInterval(id);
+  }, [fetchDailyLog, dailySessions, selectedSession]);
 
   async function deleteOne(id: number) {
     await fetch(`${apiBase()}/logs/${id}`, { method: "DELETE" });
@@ -481,6 +557,95 @@ export default function Logging() {
         </Box>
         );
       })()}
+
+      {/* ── Daily Scraper Log ─────────────────────────────────────────────── */}
+      <Divider sx={{ my: 4 }} />
+
+      <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+        <Typography variant="h5" fontWeight={700}>Daily Scraper Log</Typography>
+        {dailySessions.find((s) => s.session_id === selectedSession)?.status === "running" && (
+          <Chip label="Live" color="success" size="small" />
+        )}
+        {dailySessions.length > 0 && (
+          <Select
+            value={selectedSession}
+            onChange={(e) => setSelectedSession(e.target.value)}
+            size="small"
+            sx={{ minWidth: 280, ml: "auto" }}
+          >
+            {dailySessions.map((s) => {
+              const d = new Date(s.started_at);
+              const label = d.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+              const statusLabel = s.status === "running" ? " ▶ läuft" : s.status === "completed" ? " ✓" : " ✗";
+              return (
+                <MenuItem key={s.session_id} value={s.session_id}>
+                  {label}{statusLabel} — {s.asins_done ?? 0} ASINs, {s.asins_errors ?? 0} Fehler
+                </MenuItem>
+              );
+            })}
+          </Select>
+        )}
+        <Button size="small" variant="outlined" startIcon={<IcRefresh />} onClick={() => { fetchDailySessions(); fetchDailyLog(); }}>
+          Aktualisieren
+        </Button>
+      </Box>
+
+      {dailyLog.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {dailySessions.length === 0 ? "Noch keine Daily-Sessions vorhanden." : "Keine Log-Einträge für diese Session."}
+        </Typography>
+      ) : (
+        <Box sx={{ overflowX: "auto" }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>Zeitpunkt</TableCell>
+                <TableCell>Phase</TableCell>
+                <TableCell>Level</TableCell>
+                <TableCell>Meldung</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {dailyLog.map((entry) => (
+                <TableRow
+                  key={entry.id}
+                  sx={{
+                    bgcolor:
+                      entry.level === "error" ? "rgba(244,67,54,0.08)" :
+                      entry.level === "warning" ? "rgba(255,193,7,0.08)" :
+                      undefined,
+                  }}
+                >
+                  <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "text.secondary" }}>
+                    {formatTime(entry.timestamp)}
+                  </TableCell>
+                  <TableCell>
+                    {entry.phase && (
+                      <Chip
+                        label={PHASE_LABELS[entry.phase] ?? entry.phase}
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontSize: "0.7rem" }}
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={entry.level}
+                      color={LEVEL_COLORS[entry.level] ?? "default"}
+                      size="small"
+                      sx={{ fontSize: "0.7rem" }}
+                    />
+                  </TableCell>
+                  <TableCell sx={{ fontSize: "0.82rem", fontFamily: entry.level === "error" ? "monospace" : undefined }}>
+                    {entry.message}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
+      )}
 
       {/* Screenshot lightbox */}
       <Dialog open={!!screenshot} onClose={() => setScreenshot(null)} maxWidth="xl">

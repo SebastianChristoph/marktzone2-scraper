@@ -7,7 +7,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from app.db.adapter import USE_POSTGRES, PH, make_pg_conn, fetch_all, fetch_one
+from app.db.adapter import USE_POSTGRES, PH, make_pg_conn, fetch_all, fetch_one, serial_pk
 
 _local = threading.local()
 
@@ -57,6 +57,16 @@ def init_db() -> None:
             products_new     INTEGER DEFAULT 0,
             markets_changed  INTEGER DEFAULT 0,
             total_duration_s REAL
+        )
+    """)
+    _ex(f"""
+        CREATE TABLE IF NOT EXISTS daily_log (
+            id         {serial_pk()},
+            session_id TEXT NOT NULL,
+            timestamp  TEXT NOT NULL,
+            level      TEXT NOT NULL DEFAULT 'info',
+            phase      TEXT,
+            message    TEXT NOT NULL
         )
     """)
     _commit()
@@ -132,7 +142,41 @@ def get_history(limit: int = 30) -> list[dict]:
     return [dict(r) for r in fetch_all(cur)]
 
 
+def log_daily_event(session_id: str, message: str, level: str = "info", phase: str | None = None) -> None:
+    """Append a structured log entry for a daily session."""
+    now = datetime.now(timezone.utc).isoformat()
+    _ex(
+        f"INSERT INTO daily_log (session_id, timestamp, level, phase, message) VALUES ({PH},{PH},{PH},{PH},{PH})",
+        (session_id, now, level, phase, message),
+    )
+    _commit()
+
+
+def get_daily_log(session_id: str | None = None, limit: int = 500) -> list[dict]:
+    """Return log entries for a session, most recent first."""
+    if session_id:
+        cur = _ex(
+            f"SELECT * FROM daily_log WHERE session_id = {PH} ORDER BY timestamp ASC LIMIT {PH}",
+            (session_id, limit),
+        )
+    else:
+        # Default: most recent session
+        cur = _ex(
+            f"""SELECT l.* FROM daily_log l
+                JOIN (SELECT session_id FROM daily_sessions ORDER BY started_at DESC LIMIT 1) s
+                ON l.session_id = s.session_id
+                ORDER BY l.timestamp ASC LIMIT {PH}""",
+            (limit,),
+        )
+    return [dict(r) for r in fetch_all(cur)]
+
+
 def clear_history() -> int:
-    """Delete all completed/failed daily sessions. Returns number of deleted rows."""
+    """Delete all completed/failed daily sessions and their log entries. Returns number of deleted rows."""
+    _ex(
+        f"DELETE FROM daily_log WHERE session_id IN (SELECT session_id FROM daily_sessions WHERE status != {PH})",
+        ("running",),
+    )
     cur = _ex(f"DELETE FROM daily_sessions WHERE status != {PH}", ("running",))
+    _commit()
     return cur.rowcount
