@@ -23,8 +23,8 @@ from app.db.daily_store import (
 router = APIRouter(prefix="/daily", tags=["daily"])
 logger = logging.getLogger(__name__)
 
-# 2 concurrent Playwright instances — reduces simultaneous proxy tunnel load
-_BROWSER_SEM = asyncio.Semaphore(2)
+# 1 concurrent Playwright instance — eliminates proxy session collisions entirely
+_BROWSER_SEM = asyncio.Semaphore(1)
 
 # ── Request / Response models ─────────────────────────────────────────────────
 
