@@ -316,6 +316,9 @@ class ProductScraper:
         for _ in range(4):
             page.evaluate("window.scrollBy(0, window.innerHeight * 0.8)")
             time.sleep(random.uniform(0.4, 0.8))
+        # Scroll to absolute bottom to trigger lazy-loaded sections (e.g. Additional Information / BSR)
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        time.sleep(1.0)
         page.evaluate("window.scrollTo(0, 0)")
         time.sleep(0.3)
 
