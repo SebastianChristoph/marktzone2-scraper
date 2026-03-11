@@ -16,6 +16,7 @@ def trip():
 
 def wait_if_tripped():
     """Block until the circuit breaker resets (tunnel assumed recovered)."""
+    global _tripped_at
     while True:
         with _lock:
             if _tripped_at is None:
