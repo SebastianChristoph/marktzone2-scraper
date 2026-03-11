@@ -646,6 +646,20 @@ class ProductScraper:
             except Exception as e:
                 logger.warning(f"[PS] rank_data js: {e}")
 
+        # 2b) Search rendered body text for "Best Sellers Rank" — plain text, no HTML noise
+        if page:
+            try:
+                body_text = page.evaluate("() => document.body.innerText")
+                if body_text and "Best Sellers Rank" in body_text:
+                    idx = body_text.index("Best Sellers Rank")
+                    vicinity = body_text[idx:idx + 500]
+                    parsed = self._parse_bsr_text(vicinity)
+                    if parsed and parsed.get("main_category_rank") is not None:
+                        logger.info(f"[PS] rank_data found via body_text search")
+                        return parsed
+            except Exception as e:
+                logger.warning(f"[PS] rank_data body_text: {e}")
+
         # 3) Last-resort: regex on raw page HTML — normalize &nbsp; entities
         if page:
             try:
