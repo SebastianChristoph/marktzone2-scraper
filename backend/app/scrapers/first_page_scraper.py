@@ -11,8 +11,14 @@ from playwright.sync_api import sync_playwright, Page
 from app.db.error_log import log_error
 from app.db.paths import SCREENSHOTS_DIR
 from app.scrapers.proxy_manager import get_proxy
+from app.scrapers.proxy_circuit_breaker import trip, wait_if_tripped, reset
 
 logger = logging.getLogger(__name__)
+
+
+class ProxyTunnelError(RuntimeError):
+    pass
+
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -37,12 +43,27 @@ class FirstPageScraper:
     def _scrape_sync(self, keyword: str, job_id: Optional[str], test_screenshot: bool = False, country: Optional[str] = None) -> dict:
         max_retries = 5
         for attempt in range(max_retries):
+            wait_if_tripped()
             try:
                 result = self._scrape_once_sync(keyword, job_id, attempt + 1, test_screenshot, country)
                 if result is not None:
+                    reset()
                     result["_debug"] = {**result.get("_debug", {}), "attempts": attempt + 1}
                     return result
                 logger.warning(f"[FP] No products on attempt {attempt + 1}")
+            except ProxyTunnelError as e:
+                trip()
+                logger.warning(f"[FP] Proxy tunnel down on attempt {attempt + 1}, circuit tripped")
+                if attempt == max_retries - 1:
+                    log_error(
+                        scraper_type="first_page",
+                        context=keyword,
+                        error_type="scrape_failed",
+                        error_message=f"All {max_retries} retries exhausted (tunnel): {e}",
+                        url=f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}",
+                        job_id=job_id,
+                        attempt=attempt + 1,
+                    )
             except Exception as e:
                 logger.error(f"[FP] Attempt {attempt + 1} failed: {e}")
                 if attempt == max_retries - 1:
@@ -115,6 +136,8 @@ class FirstPageScraper:
                 try:
                     page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 except Exception as goto_err:
+                    if "ERR_TUNNEL_CONNECTION_FAILED" in str(goto_err):
+                        raise ProxyTunnelError(str(goto_err))
                     screenshot = self._take_screenshot(page, keyword, "timeout")
                     log_error(
                         scraper_type="first_page",

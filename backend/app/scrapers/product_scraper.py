@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright, Page, ElementHandle
 from app.db.error_log import log_error
 from app.db.paths import SCREENSHOTS_DIR
 from app.scrapers.proxy_manager import get_proxy
+from app.scrapers.proxy_circuit_breaker import trip, wait_if_tripped
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class ProductScraper:
         base_session = random.randint(0, _US_SESSION_COUNT - 1)
         sessions = [(base_session + i) % _US_SESSION_COUNT + 1 for i in range(max_retries)]
         for attempt in range(max_retries):
+            wait_if_tripped()
             try:
                 result = self._scrape_once_sync(asin, job_id, attempt + 1, test_screenshot,
                                                 use_proxy=True, session_num=sessions[attempt])
@@ -53,7 +55,11 @@ class ProductScraper:
                 logger.warning(f"[PS] No data on attempt {attempt + 1} for {asin}")
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"[PS] Attempt {attempt + 1} failed for {asin}: {e}")
+                if "ERR_TUNNEL_CONNECTION_FAILED" in last_error:
+                    trip()
+                    logger.warning(f"[PS] Proxy tunnel down on attempt {attempt + 1} for {asin}, circuit tripped")
+                else:
+                    logger.error(f"[PS] Attempt {attempt + 1} failed for {asin}: {e}")
             if attempt < max_retries - 1:
                 backoff = self.retry_backoffs[attempt] if attempt < len(self.retry_backoffs) else self.retry_backoffs[-1]
                 logger.info(f"[PS] Waiting {backoff}s before retry...")
