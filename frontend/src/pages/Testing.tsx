@@ -427,7 +427,7 @@ export default function Testing() {
       <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
         <Typography variant="subtitle1" fontWeight={600} mb={1.5}>Amazon Product Scraper</Typography>
         <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
-          {["B0F5WZ4V5N", "B0CTNWBT1Z"].map((asin) => (
+          {["B0F5WZ4V5N", "B0CTNWBT1Z", "B0FXMWY914", "B0GFWLY9BF", "B01M5KZTAQ"].map((asin) => (
             <Chip key={asin} label={asin} size="small" variant="outlined" onClick={() => setProductAsin(asin)}
               sx={{ cursor: "pointer", fontSize: "0.72rem", fontFamily: "monospace" }} />
           ))}
