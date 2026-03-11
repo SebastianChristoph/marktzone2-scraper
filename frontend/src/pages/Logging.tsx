@@ -6,7 +6,6 @@ import {
   CircularProgress,
   Dialog,
   DialogContent,
-  Divider,
   FormControlLabel,
   IconButton,
   Link,
@@ -14,11 +13,13 @@ import {
   Switch,
   MenuItem,
   Select,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -141,6 +142,7 @@ const LEVEL_COLORS: Record<string, "error" | "warning" | "info" | "success" | "d
 };
 
 export default function Logging() {
+  const [activeTab, setActiveTab] = useState(0);
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
   const [count24h, setCount24h] = useState(0);
   const [scraperType, setScraperType] = useState("");
@@ -317,6 +319,8 @@ export default function Logging() {
     setRetryAllProgress(null);
   }
 
+  const isRunning = dailySessions.find((s) => s.session_id === selectedSession)?.status === "running";
+
   return (
     <Box>
       {/* Header */}
@@ -377,273 +381,264 @@ export default function Logging() {
         {remoteMode && <Chip label="Fix with AI immer lokal" size="small" variant="outlined" color="info" />}
       </Box>
 
-      {/* Filters */}
-      <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "center", flexWrap: "wrap" }}>
-        <Select value={scraperType} onChange={(e) => setScraperType(e.target.value)} displayEmpty size="small" sx={{ minWidth: 160 }}>
-          <MenuItem value="">Alle Scraper</MenuItem>
-          <MenuItem value="first_page">First Page</MenuItem>
-          <MenuItem value="product">Product</MenuItem>
-        </Select>
-        <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", alignItems: "center" }}>
-          {(["captcha", "no_price", "no_title", "no_products", "out_of_stock", "scrape_failed", "general"] as const).map((type) => {
-            const active = !hiddenTypes.has(type);
-            return (
-              <Chip
-                key={type}
-                label={type}
-                size="small"
-                color={active ? (ERROR_TYPE_COLORS[type] ?? "default") : "default"}
-                variant={active ? "filled" : "outlined"}
-                onClick={() =>
-                  setHiddenTypes((prev) => {
-                    const next = new Set(prev);
-                    next.has(type) ? next.delete(type) : next.add(type);
-                    return next;
-                  })
-                }
-                sx={{ cursor: "pointer", opacity: active ? 1 : 0.4 }}
-              />
-            );
-          })}
-        </Box>
-        <Button size="small" onClick={fetchLogs} variant="outlined" startIcon={<IcRefresh />}>Aktualisieren</Button>
-      </Box>
+      {/* Tabs */}
+      <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
+        <Tab label={
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            Fehler-Log
+            {count24h > 0 && <Chip label={count24h} color="error" size="small" sx={{ height: 18, fontSize: "0.68rem" }} />}
+          </Box>
+        } />
+        <Tab label={
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            Daily Scraper
+            {isRunning && <Chip label="Live" color="success" size="small" sx={{ height: 18, fontSize: "0.68rem" }} />}
+          </Box>
+        } />
+      </Tabs>
 
-      <Divider sx={{ mb: 2 }} />
-
-      {(() => {
-        const visible = errors.filter((e) => !hiddenTypes.has(e.error_type));
-        return visible.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            {scraperType || hiddenTypes.size > 0 ? "Keine Fehler für diesen Filter." : "Keine Fehler protokolliert."}
-          </Typography>
-        ) : (
-          <Box sx={{ overflowX: "auto" }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ whiteSpace: "nowrap" }}>Zeitpunkt</TableCell>
-                <TableCell>Scraper</TableCell>
-                <TableCell>Kontext</TableCell>
-                <TableCell>Fehlertyp</TableCell>
-                <TableCell>Meldung</TableCell>
-                <TableCell>Attempt</TableCell>
-                <TableCell>Aktionen</TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visible.map((e) => {
-                const rs = getRowState(e.id);
+      {/* ── Tab 0: Fehler-Log ────────────────────────────────────────────── */}
+      {activeTab === 0 && (
+        <Box>
+          {/* Filters */}
+          <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "center", flexWrap: "wrap" }}>
+            <Select value={scraperType} onChange={(e) => setScraperType(e.target.value)} displayEmpty size="small" sx={{ minWidth: 160 }}>
+              <MenuItem value="">Alle Scraper</MenuItem>
+              <MenuItem value="first_page">First Page</MenuItem>
+              <MenuItem value="product">Product</MenuItem>
+            </Select>
+            <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", alignItems: "center" }}>
+              {(["captcha", "no_price", "no_title", "no_products", "out_of_stock", "scrape_failed", "general"] as const).map((type) => {
+                const active = !hiddenTypes.has(type);
                 return (
-                  <TableRow key={e.id} sx={{ bgcolor: ROW_BG[rs.state] }}>
-                    <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "text.secondary" }}>
-                      {formatTime(e.timestamp)}
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={e.scraper_type === "first_page" ? "First Page" : "Product"} size="small" variant="outlined" />
-                    </TableCell>
-                    <TableCell>
-                      {e.url ? (
-                        <Tooltip title={e.url} placement="top">
-                          <Link href={e.url} target="_blank" rel="noopener noreferrer" underline="hover"
-                            sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                            {e.context}
-                          </Link>
-                        </Tooltip>
-                      ) : (
-                        <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{e.context}</Typography>
-                      )}
-                      {e.job_id && (
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          Job {e.job_id.slice(0, 8)}…
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={e.error_type} color={ERROR_TYPE_COLORS[e.error_type] ?? "default"} size="small" />
-                    </TableCell>
-                    <TableCell sx={{ maxWidth: 220 }}>
-                      {rs.state === "verified_fixed" && rs.retryResult ? (
-                        <Tooltip
-                          title={
-                            <Box component="pre" sx={{ m: 0, fontSize: "0.7rem", maxHeight: 300, overflowY: "auto" }}>
-                              {JSON.stringify(rs.retryResult, null, 2)}
-                            </Box>
-                          }
-                          placement="right"
-                          componentsProps={{ tooltip: { sx: { maxWidth: 480, bgcolor: "grey.900" } } }}
-                        >
-                          <Typography variant="body2" sx={{ fontSize: "0.78rem", color: "success.main", fontWeight: 600, cursor: "help" }}>
-                            {extractRetryValue(e.error_type, rs.retryResult) ?? "Erfolgreich"}
-                          </Typography>
-                        </Tooltip>
-                      ) : (
-                        <Typography variant="body2" sx={{ fontSize: "0.78rem", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                          {e.error_message ?? "—"}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ color: "text.secondary", fontSize: "0.78rem" }}>
-                      {e.attempt ?? "—"}
-                    </TableCell>
-
-                    {/* Action column */}
-                    <TableCell>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, alignItems: "flex-start" }}>
-                        {/* Screenshot */}
-                        {e.screenshot_file && (
-                          <Button size="small" variant="outlined" startIcon={<IcCamera />}
-                            sx={{ fontSize: "0.68rem", px: 1, py: 0.25 }}
-                            onClick={() => setScreenshot(`${screenshotBase()}/static/screenshots/${e.screenshot_file}`)}>
-                            Screenshot
-                          </Button>
-                        )}
-
-                        {/* Ist korrekt — entfernt den Log-Eintrag */}
-                        <Button size="small" variant="outlined" color="inherit" startIcon={<IcCheck />}
-                          sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap", color: "text.secondary" }}
-                          onClick={() => deleteOne(e.id)}>
-                          Ist korrekt
-                        </Button>
-
-                        {/* State label */}
-                        {rs.state === "verified_fixed" && (
-                          <Chip label="✓ Gefixt" color="success" size="small" />
-                        )}
-                        {rs.state === "still_broken" && (
-                          <Chip label="✗ Noch offen" color="error" size="small" />
-                        )}
-
-                        {isLocal && (
-                          <>
-                            {/* Fix with AI — initial or "again" */}
-                            {(rs.state === "none" || rs.state === "verified_fixed") && (
-                              <Button size="small" variant="contained" color="secondary" startIcon={<IcAutoFix />}
-                                sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
-                                onClick={() => fixWithAi(e, false)}>
-                                Fix with AI
-                              </Button>
-                            )}
-                            {rs.state === "still_broken" && (
-                              <Button size="small" variant="contained" color="error" startIcon={<IcAutoFix />}
-                                sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
-                                onClick={() => fixWithAi(e, true)}>
-                                Fix with AI again ({rs.fixAttempts}×)
-                              </Button>
-                            )}
-
-                            {/* Retry — always available */}
-                            <Button size="small" variant="outlined" color="primary"
-                              sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
-                              disabled={rs.state === "retrying" || !!retryAllProgress}
-                              startIcon={rs.state === "retrying" ? <CircularProgress size={10} /> : <IcReplay />}
-                              onClick={() => retryScrape(e)}>
-                              {rs.state === "retrying" ? "Scrapt…" : "Retry product scraping"}
-                            </Button>
-                          </>
-                        )}
-                      </Box>
-                    </TableCell>
-
-                    <TableCell>
-                      <IconButton size="small" onClick={() => deleteOne(e.id)} title="Eintrag löschen">✕</IconButton>
-                    </TableCell>
-                  </TableRow>
+                  <Chip
+                    key={type}
+                    label={type}
+                    size="small"
+                    color={active ? (ERROR_TYPE_COLORS[type] ?? "default") : "default"}
+                    variant={active ? "filled" : "outlined"}
+                    onClick={() =>
+                      setHiddenTypes((prev) => {
+                        const next = new Set(prev);
+                        next.has(type) ? next.delete(type) : next.add(type);
+                        return next;
+                      })
+                    }
+                    sx={{ cursor: "pointer", opacity: active ? 1 : 0.4 }}
+                  />
                 );
               })}
-            </TableBody>
-          </Table>
+            </Box>
+            <Button size="small" onClick={fetchLogs} variant="outlined" startIcon={<IcRefresh />}>Aktualisieren</Button>
+          </Box>
+
+          {(() => {
+            const visible = errors.filter((e) => !hiddenTypes.has(e.error_type));
+            return visible.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                {scraperType || hiddenTypes.size > 0 ? "Keine Fehler für diesen Filter." : "Keine Fehler protokolliert."}
+              </Typography>
+            ) : (
+              <Box sx={{ overflowX: "auto" }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>Zeitpunkt</TableCell>
+                      <TableCell>Scraper</TableCell>
+                      <TableCell>Kontext</TableCell>
+                      <TableCell>Fehlertyp</TableCell>
+                      <TableCell>Meldung</TableCell>
+                      <TableCell>Attempt</TableCell>
+                      <TableCell>Aktionen</TableCell>
+                      <TableCell />
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {visible.map((e) => {
+                      const rs = getRowState(e.id);
+                      return (
+                        <TableRow key={e.id} sx={{ bgcolor: ROW_BG[rs.state] }}>
+                          <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "text.secondary" }}>
+                            {formatTime(e.timestamp)}
+                          </TableCell>
+                          <TableCell>
+                            <Chip label={e.scraper_type === "first_page" ? "First Page" : "Product"} size="small" variant="outlined" />
+                          </TableCell>
+                          <TableCell>
+                            {e.url ? (
+                              <Tooltip title={e.url} placement="top">
+                                <Link href={e.url} target="_blank" rel="noopener noreferrer" underline="hover"
+                                  sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                                  {e.context}
+                                </Link>
+                              </Tooltip>
+                            ) : (
+                              <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{e.context}</Typography>
+                            )}
+                            {e.job_id && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                Job {e.job_id.slice(0, 8)}…
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Chip label={e.error_type} color={ERROR_TYPE_COLORS[e.error_type] ?? "default"} size="small" />
+                          </TableCell>
+                          <TableCell sx={{ maxWidth: 220 }}>
+                            {rs.state === "verified_fixed" && rs.retryResult ? (
+                              <Tooltip
+                                title={
+                                  <Box component="pre" sx={{ m: 0, fontSize: "0.7rem", maxHeight: 300, overflowY: "auto" }}>
+                                    {JSON.stringify(rs.retryResult, null, 2)}
+                                  </Box>
+                                }
+                                placement="right"
+                                componentsProps={{ tooltip: { sx: { maxWidth: 480, bgcolor: "grey.900" } } }}
+                              >
+                                <Typography variant="body2" sx={{ fontSize: "0.78rem", color: "success.main", fontWeight: 600, cursor: "help" }}>
+                                  {extractRetryValue(e.error_type, rs.retryResult) ?? "Erfolgreich"}
+                                </Typography>
+                              </Tooltip>
+                            ) : (
+                              <Typography variant="body2" sx={{ fontSize: "0.78rem", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {e.error_message ?? "—"}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ color: "text.secondary", fontSize: "0.78rem" }}>
+                            {e.attempt ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, alignItems: "flex-start" }}>
+                              {e.screenshot_file && (
+                                <Button size="small" variant="outlined" startIcon={<IcCamera />}
+                                  sx={{ fontSize: "0.68rem", px: 1, py: 0.25 }}
+                                  onClick={() => setScreenshot(`${screenshotBase()}/static/screenshots/${e.screenshot_file}`)}>
+                                  Screenshot
+                                </Button>
+                              )}
+                              <Button size="small" variant="outlined" color="inherit" startIcon={<IcCheck />}
+                                sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap", color: "text.secondary" }}
+                                onClick={() => deleteOne(e.id)}>
+                                Ist korrekt
+                              </Button>
+                              {rs.state === "verified_fixed" && <Chip label="✓ Gefixt" color="success" size="small" />}
+                              {rs.state === "still_broken" && <Chip label="✗ Noch offen" color="error" size="small" />}
+                              {isLocal && (
+                                <>
+                                  {(rs.state === "none" || rs.state === "verified_fixed") && (
+                                    <Button size="small" variant="contained" color="secondary" startIcon={<IcAutoFix />}
+                                      sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
+                                      onClick={() => fixWithAi(e, false)}>
+                                      Fix with AI
+                                    </Button>
+                                  )}
+                                  {rs.state === "still_broken" && (
+                                    <Button size="small" variant="contained" color="error" startIcon={<IcAutoFix />}
+                                      sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
+                                      onClick={() => fixWithAi(e, true)}>
+                                      Fix with AI again ({rs.fixAttempts}×)
+                                    </Button>
+                                  )}
+                                  <Button size="small" variant="outlined" color="primary"
+                                    sx={{ fontSize: "0.68rem", px: 1, py: 0.25, whiteSpace: "nowrap" }}
+                                    disabled={rs.state === "retrying" || !!retryAllProgress}
+                                    startIcon={rs.state === "retrying" ? <CircularProgress size={10} /> : <IcReplay />}
+                                    onClick={() => retryScrape(e)}>
+                                    {rs.state === "retrying" ? "Scrapt…" : "Retry product scraping"}
+                                  </Button>
+                                </>
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <IconButton size="small" onClick={() => deleteOne(e.id)} title="Eintrag löschen">✕</IconButton>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Box>
+            );
+          })()}
         </Box>
-        );
-      })()}
+      )}
 
-      {/* ── Daily Scraper Log ─────────────────────────────────────────────── */}
-      <Divider sx={{ my: 4 }} />
+      {/* ── Tab 1: Daily Scraper Log ─────────────────────────────────────── */}
+      {activeTab === 1 && (
+        <Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
+            {dailySessions.length > 0 && (
+              <Select
+                value={selectedSession}
+                onChange={(e) => setSelectedSession(e.target.value)}
+                size="small"
+                sx={{ minWidth: 280 }}
+              >
+                {dailySessions.map((s) => {
+                  const d = new Date(s.started_at);
+                  const label = d.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
+                  const statusLabel = s.status === "running" ? " ▶ läuft" : s.status === "completed" ? " ✓" : " ✗";
+                  return (
+                    <MenuItem key={s.session_id} value={s.session_id}>
+                      {label}{statusLabel} — {s.asins_done ?? 0} ASINs, {s.asins_errors ?? 0} Fehler
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            )}
+            <Button size="small" variant="outlined" startIcon={<IcRefresh />} onClick={() => { fetchDailySessions(); fetchDailyLog(); }}>
+              Aktualisieren
+            </Button>
+          </Box>
 
-      <Box sx={{ mb: 2, display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-        <Typography variant="h5" fontWeight={700}>Daily Scraper Log</Typography>
-        {dailySessions.find((s) => s.session_id === selectedSession)?.status === "running" && (
-          <Chip label="Live" color="success" size="small" />
-        )}
-        {dailySessions.length > 0 && (
-          <Select
-            value={selectedSession}
-            onChange={(e) => setSelectedSession(e.target.value)}
-            size="small"
-            sx={{ minWidth: 280, ml: "auto" }}
-          >
-            {dailySessions.map((s) => {
-              const d = new Date(s.started_at);
-              const label = d.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
-              const statusLabel = s.status === "running" ? " ▶ läuft" : s.status === "completed" ? " ✓" : " ✗";
-              return (
-                <MenuItem key={s.session_id} value={s.session_id}>
-                  {label}{statusLabel} — {s.asins_done ?? 0} ASINs, {s.asins_errors ?? 0} Fehler
-                </MenuItem>
-              );
-            })}
-          </Select>
-        )}
-        <Button size="small" variant="outlined" startIcon={<IcRefresh />} onClick={() => { fetchDailySessions(); fetchDailyLog(); }}>
-          Aktualisieren
-        </Button>
-      </Box>
-
-      {dailyLog.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          {dailySessions.length === 0 ? "Noch keine Daily-Sessions vorhanden." : "Keine Log-Einträge für diese Session."}
-        </Typography>
-      ) : (
-        <Box sx={{ overflowX: "auto" }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ whiteSpace: "nowrap" }}>Zeitpunkt</TableCell>
-                <TableCell>Phase</TableCell>
-                <TableCell>Level</TableCell>
-                <TableCell>Meldung</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {dailyLog.map((entry) => (
-                <TableRow
-                  key={entry.id}
-                  sx={{
-                    bgcolor:
-                      entry.level === "error" ? "rgba(244,67,54,0.08)" :
-                      entry.level === "warning" ? "rgba(255,193,7,0.08)" :
-                      undefined,
-                  }}
-                >
-                  <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "text.secondary" }}>
-                    {formatTime(entry.timestamp)}
-                  </TableCell>
-                  <TableCell>
-                    {entry.phase && (
-                      <Chip
-                        label={PHASE_LABELS[entry.phase] ?? entry.phase}
-                        size="small"
-                        variant="outlined"
-                        sx={{ fontSize: "0.7rem" }}
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={entry.level}
-                      color={LEVEL_COLORS[entry.level] ?? "default"}
-                      size="small"
-                      sx={{ fontSize: "0.7rem" }}
-                    />
-                  </TableCell>
-                  <TableCell sx={{ fontSize: "0.82rem", fontFamily: entry.level === "error" ? "monospace" : undefined }}>
-                    {entry.message}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {dailyLog.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              {dailySessions.length === 0 ? "Noch keine Daily-Sessions vorhanden." : "Keine Log-Einträge für diese Session."}
+            </Typography>
+          ) : (
+            <Box sx={{ overflowX: "auto" }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>Zeitpunkt</TableCell>
+                    <TableCell>Phase</TableCell>
+                    <TableCell>Level</TableCell>
+                    <TableCell>Meldung</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {dailyLog.map((entry) => (
+                    <TableRow
+                      key={entry.id}
+                      sx={{
+                        bgcolor:
+                          entry.level === "error" ? "rgba(244,67,54,0.08)" :
+                          entry.level === "warning" ? "rgba(255,193,7,0.08)" :
+                          undefined,
+                      }}
+                    >
+                      <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.78rem", color: "text.secondary" }}>
+                        {formatTime(entry.timestamp)}
+                      </TableCell>
+                      <TableCell>
+                        {entry.phase && (
+                          <Chip label={PHASE_LABELS[entry.phase] ?? entry.phase} size="small" variant="outlined" sx={{ fontSize: "0.7rem" }} />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip label={entry.level} color={LEVEL_COLORS[entry.level] ?? "default"} size="small" sx={{ fontSize: "0.7rem" }} />
+                      </TableCell>
+                      <TableCell sx={{ fontSize: "0.82rem", fontFamily: entry.level === "error" ? "monospace" : undefined }}>
+                        {entry.message}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
         </Box>
       )}
 
