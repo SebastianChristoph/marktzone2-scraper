@@ -264,6 +264,14 @@ export default function Logging() {
     await fetch("/api/logs/screenshots", { method: "DELETE" });
   }
 
+  async function clearDailyHistory() {
+    const base = remoteMode && remoteUrl ? remoteUrl : "/api";
+    await fetch(`${base}/daily/history`, { method: "DELETE" });
+    setDailySessions([]);
+    setSelectedSession("");
+    setDailyLog([]);
+  }
+
   async function fixWithAi(e: ErrorEntry, isRetry = false) {
     const prev = getRowState(e.id);
     const attempts = isRetry ? prev.fixAttempts + 1 : 1;
@@ -352,9 +360,6 @@ export default function Logging() {
               Screenshots löschen
             </Button>
           )}
-          <Button variant="outlined" color="error" size="small" disabled={errors.length === 0} startIcon={<IcDeleteAll />} onClick={clearAll}>
-            Alle Logs löschen
-          </Button>
         </Box>
       </Box>
 
@@ -430,6 +435,9 @@ export default function Logging() {
               })}
             </Box>
             <Button size="small" onClick={fetchLogs} variant="outlined" startIcon={<IcRefresh />}>Aktualisieren</Button>
+            <Button variant="outlined" color="error" size="small" disabled={errors.length === 0} startIcon={<IcDeleteAll />} onClick={clearAll}>
+              Alle Logs löschen
+            </Button>
           </Box>
 
           {(() => {
@@ -590,6 +598,9 @@ export default function Logging() {
             )}
             <Button size="small" variant="outlined" startIcon={<IcRefresh />} onClick={() => { fetchDailySessions(); fetchDailyLog(); }}>
               Aktualisieren
+            </Button>
+            <Button variant="outlined" color="error" size="small" disabled={dailySessions.length === 0} startIcon={<IcDeleteAll />} onClick={clearDailyHistory}>
+              Alle Logs löschen
             </Button>
           </Box>
 
