@@ -81,20 +81,19 @@ async def _scrape_market(keyword: str) -> tuple[str, list[str], list[str]]:
         return keyword, [], []
 
 
-async def _scrape_product(asin: str) -> dict | None:
-    """Scrape a single product page. Returns product dict or None on error."""
+async def _scrape_product(asin: str) -> tuple[dict | None, str | None]:
+    """Scrape a single product page. Returns (result, error_type). error_type is None on success."""
     try:
         async with _BROWSER_SEM:
-            # #2: short backoffs for daily batch — proxy rotation is more effective than waiting
             scraper = ProductScraper(headless=True, retry_backoffs=DAILY_RETRY_BACKOFFS)
             result = await scraper.scrape(asin)
         if result is None:
-            # product_scraper already logged scrape_failed — no double log here (#4)
-            return None
+            # product_scraper already logged scrape_failed
+            return None, "scrape_failed"
         if "error" in result:
-            # product_scraper already logged the specific error (out_of_stock etc.) — no double log (#4)
-            return None
-        return result
+            # product_scraper already logged the specific error
+            return None, str(result["error"])
+        return result, None
     except Exception as e:
         logger.warning(f"[Daily] Product scrape failed for '{asin}': {e}")
         log_error(
@@ -104,7 +103,7 @@ async def _scrape_product(asin: str) -> dict | None:
             error_message=str(e),
             url=f"https://www.amazon.com/dp/{asin}?language=en_US",
         )
-        return None
+        return None, "exception"
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -186,9 +185,60 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
     tasks = [_scrape_product(asin) for asin in req.asins]
     raw_results = await asyncio.gather(*tasks)
 
-    results = [r for r in raw_results if r is not None]
+    results: list[dict] = []
+    error_map: dict[str, list[str]] = {}  # error_type → list of ASINs
+    for (result, error_type), asin in zip(raw_results, req.asins):
+        if result is not None:
+            results.append(result)
+        elif error_type:
+            error_map.setdefault(error_type, []).append(asin)
+
     errors = len(req.asins) - len(results)
     error_rate = errors / len(req.asins) if req.asins else 0
+
+    # Log per-error-type breakdown for post-mortem analysis
+    if error_map:
+        # Captcha / bot-detection: escalate each ASIN individually
+        for asin in error_map.get("captcha", []):
+            log_daily_event(
+                req.session_id,
+                f"CAPTCHA / Bot-Check erkannt: {asin}",
+                level="error", phase="product_scraping",
+            )
+        # scrape_failed: show first 5, then summarize
+        sf_asins = error_map.get("scrape_failed", [])
+        if sf_asins:
+            shown = sf_asins[:5]
+            remainder = len(sf_asins) - len(shown)
+            log_daily_event(
+                req.session_id,
+                f"scrape_failed ({len(sf_asins)}x): {', '.join(shown)}"
+                + (f" … +{remainder} weitere" if remainder else ""),
+                level="warning", phase="product_scraping",
+            )
+        # exception: show first 5, summarize rest
+        ex_asins = error_map.get("exception", [])
+        if ex_asins:
+            shown = ex_asins[:5]
+            remainder = len(ex_asins) - len(shown)
+            log_daily_event(
+                req.session_id,
+                f"exception ({len(ex_asins)}x): {', '.join(shown)}"
+                + (f" … +{remainder} weitere" if remainder else ""),
+                level="warning", phase="product_scraping",
+            )
+        # Any other error types
+        for err_type, asins in error_map.items():
+            if err_type in ("captcha", "scrape_failed", "exception"):
+                continue
+            shown = asins[:5]
+            remainder = len(asins) - len(shown)
+            log_daily_event(
+                req.session_id,
+                f"{err_type} ({len(asins)}x): {', '.join(shown)}"
+                + (f" … +{remainder} weitere" if remainder else ""),
+                level="warning", phase="product_scraping",
+            )
 
     # #3: Detect proxy blockade — abort if ≥ 70% of batch failed
     aborted = False
