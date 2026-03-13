@@ -17,6 +17,7 @@ import { isLocal } from "../utils/debug";
 
 const DEFAULT_ASINS = "B07XYZABC1,B08QRSTUVW,B09MNOPQR2,B06DEFGHIJ,B01KLMNOPQ";
 const DEFAULT_MARKETS = "Bluetooth Lautsprecher,Fitness Tracker,Luftbefeuchter";
+const EXPL_MARKETS = "creatine,protein powder,yoga mat,resistance bands";
 
 const JsonBox = ({ data }: { data: unknown }) => (
   <Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "action.hover", borderRadius: 1, fontSize: "0.78rem", overflowX: "auto" }}>
@@ -131,6 +132,75 @@ export default function Testing() {
       if (scraperTimerRef.current) { clearInterval(scraperTimerRef.current); scraperTimerRef.current = null; }
       setScraperDuration((Date.now() - t0) / 1000);
       setScraperLoading(false);
+    }
+  }
+
+  // ── Explorativ (raw HTTP) ────────────────────────────────────────────────
+  const [explFpKeyword, setExplFpKeyword] = useState("");
+  const [explFpLoading, setExplFpLoading] = useState(false);
+  const [explFpResult, setExplFpResult] = useState<unknown>(null);
+  const [explFpError, setExplFpError] = useState<string | null>(null);
+
+  const [explProdAsin, setExplProdAsin] = useState("");
+  const [explProdLoading, setExplProdLoading] = useState(false);
+  const [explProdResult, setExplProdResult] = useState<unknown>(null);
+  const [explProdError, setExplProdError] = useState<string | null>(null);
+
+  const [explClusterMarkets, setExplClusterMarkets] = useState(EXPL_MARKETS);
+  const [explClusterLoading, setExplClusterLoading] = useState(false);
+  const [explClusterResult, setExplClusterResult] = useState<unknown>(null);
+  const [explClusterError, setExplClusterError] = useState<string | null>(null);
+  const [explClusterElapsed, setExplClusterElapsed] = useState(0);
+  const explClusterTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function handleExplFirstPage() {
+    if (!explFpKeyword.trim()) return;
+    setExplFpLoading(true); setExplFpResult(null); setExplFpError(null);
+    try {
+      const res = await fetch("/api/exploratory/first-page", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: explFpKeyword.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setExplFpResult(await res.json());
+    } catch (e) { setExplFpError(e instanceof Error ? e.message : "Unknown error"); }
+    finally { setExplFpLoading(false); }
+  }
+
+  async function handleExplProduct() {
+    if (!explProdAsin.trim()) return;
+    setExplProdLoading(true); setExplProdResult(null); setExplProdError(null);
+    try {
+      const res = await fetch("/api/exploratory/product", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asin: explProdAsin.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setExplProdResult(await res.json());
+    } catch (e) { setExplProdError(e instanceof Error ? e.message : "Unknown error"); }
+    finally { setExplProdLoading(false); }
+  }
+
+  async function handleExplCluster() {
+    const markets = explClusterMarkets.split(",").map(m => m.trim()).filter(Boolean);
+    if (!markets.length) return;
+    setExplClusterLoading(true); setExplClusterResult(null); setExplClusterError(null);
+    setExplClusterElapsed(0);
+    const t0 = Date.now();
+    explClusterTimerRef.current = setInterval(() => {
+      setExplClusterElapsed(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
+    try {
+      const res = await fetch("/api/exploratory/cluster", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markets, concurrency: 10 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setExplClusterResult(await res.json());
+    } catch (e) { setExplClusterError(e instanceof Error ? e.message : "Unknown error"); }
+    finally {
+      if (explClusterTimerRef.current) { clearInterval(explClusterTimerRef.current); explClusterTimerRef.current = null; }
+      setExplClusterLoading(false);
     }
   }
 
@@ -563,6 +633,182 @@ export default function Testing() {
             <JsonBox data={jobStatus} />
           </Box>
         )}
+      </Paper>
+
+      {/* ═════════ EXPLORATIV (raw HTTP) ═════════ */}
+      <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>
+        Explorativ — Raw HTTP (kein Playwright, kein Proxy)
+      </Typography>
+      <Divider sx={{ mb: 3, mt: 0.5 }} />
+
+      {/* Expl: First Page */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>First Page — HTTP</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Einzelner HTTP-Request an Amazon Search. Kein Browser, kein Proxy. ~2-3s.
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+          {["creatine", "yoga mat", "protein powder", "bluetooth speaker"].map((kw) => (
+            <Chip key={kw} label={kw} size="small" variant="outlined" onClick={() => setExplFpKeyword(kw)}
+              sx={{ cursor: "pointer", fontSize: "0.72rem" }} />
+          ))}
+        </Box>
+        <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
+          <TextField label="Keyword" size="small" value={explFpKeyword}
+            onChange={e => setExplFpKeyword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleExplFirstPage()}
+            disabled={explFpLoading} sx={{ flexGrow: 1 }} />
+          <Button variant="contained" onClick={handleExplFirstPage}
+            disabled={explFpLoading || !explFpKeyword.trim()}
+            startIcon={explFpLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            sx={{ whiteSpace: "nowrap", minWidth: 120 }}>
+            {explFpLoading ? "Läuft…" : "Run"}
+          </Button>
+        </Box>
+        {explFpError && <Alert severity="error" sx={{ mb: 1.5 }}>{explFpError}</Alert>}
+        {explFpResult && (() => {
+          const r = explFpResult as any;
+          const hasError = !!r.error;
+          return (
+            <Box>
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1.5, flexWrap: "wrap" }}>
+                <Chip label={hasError ? r.error : `${r.count} ASINs`} size="small"
+                  color={hasError ? "error" : "success"} />
+                <Typography variant="caption" color="text.secondary">
+                  {r.duration_s}s · HTTP {r.http_status} · {r.method}
+                </Typography>
+              </Box>
+              <JsonBox data={r} />
+            </Box>
+          );
+        })()}
+      </Paper>
+
+      {/* Expl: Product */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Product — HTTP</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Einzelner HTTP-Request an Amazon Produktseite. Parst Preis, BSR, BLM, Rating etc. ~2-3s.
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+          {["B0F5WZ4V5N", "B0CTNWBT1Z", "B0FXMWY914", "B0GFWLY9BF", "B01M5KZTAQ"].map((asin) => (
+            <Chip key={asin} label={asin} size="small" variant="outlined" onClick={() => setExplProdAsin(asin)}
+              sx={{ cursor: "pointer", fontSize: "0.72rem", fontFamily: "monospace" }} />
+          ))}
+        </Box>
+        <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start", mb: 2 }}>
+          <TextField label="ASIN" size="small" value={explProdAsin}
+            onChange={e => setExplProdAsin(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleExplProduct()}
+            disabled={explProdLoading} sx={{ flexGrow: 1 }} />
+          <Button variant="contained" onClick={handleExplProduct}
+            disabled={explProdLoading || !explProdAsin.trim()}
+            startIcon={explProdLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            sx={{ whiteSpace: "nowrap", minWidth: 120 }}>
+            {explProdLoading ? "Läuft…" : "Run"}
+          </Button>
+        </Box>
+        {explProdError && <Alert severity="error" sx={{ mb: 1.5 }}>{explProdError}</Alert>}
+        {explProdResult && (() => {
+          const r = explProdResult as any;
+          const hasError = !!r.error;
+          return (
+            <Box>
+              <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1, flexWrap: "wrap" }}>
+                <Chip label={hasError ? r.error : "OK"} size="small" color={hasError ? "error" : "success"} />
+                <Typography variant="caption" color="text.secondary">
+                  {r.duration_s}s · HTTP {r.http_status} · {r.method}
+                </Typography>
+              </Box>
+              {!hasError && (
+                <Box sx={{ mb: 1.5 }}>
+                  <a href={`https://www.amazon.com/dp/${r.asin}`} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: "0.82rem", fontFamily: "monospace" }}>
+                    amazon.com/dp/{r.asin}
+                  </a>
+                </Box>
+              )}
+              <JsonBox data={r} />
+            </Box>
+          );
+        })()}
+      </Paper>
+
+      {/* Expl: Cluster */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 600 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Cluster — HTTP (Full Pipeline)</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Komplett-Test: Markets scrapen → ASINs sammeln → alle Produkte scrapen. 10 parallele HTTP-Requests. Kein Playwright, kein Proxy.
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.75, mb: 1.5, flexWrap: "wrap" }}>
+          <Chip label="4 Test-Markets" size="small" variant="outlined"
+            onClick={() => setExplClusterMarkets(EXPL_MARKETS)}
+            sx={{ cursor: "pointer", fontSize: "0.72rem" }} />
+        </Box>
+        <TextField label="Markets (komma-separiert)" size="small" fullWidth multiline rows={2}
+          value={explClusterMarkets} onChange={e => setExplClusterMarkets(e.target.value)}
+          disabled={explClusterLoading} sx={{ mb: 2 }} />
+        <Button variant="contained" onClick={handleExplCluster}
+          disabled={explClusterLoading || !explClusterMarkets.trim()}
+          startIcon={explClusterLoading ? <CircularProgress size={16} color="inherit" /> : null}
+          sx={{ mb: 2, minWidth: 140 }}>
+          {explClusterLoading ? `Läuft… ${explClusterElapsed}s` : "Run Cluster"}
+        </Button>
+        {explClusterLoading && (
+          <Box sx={{ mb: 1.5 }}>
+            <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
+              {explClusterElapsed < 10 ? "Phase 1: Markets scrapen…" : "Phase 2: Produkte scrapen…"} ({explClusterElapsed}s)
+            </Typography>
+            <LinearProgress sx={{ borderRadius: 1 }} />
+          </Box>
+        )}
+        {explClusterError && <Alert severity="error" sx={{ mb: 1.5 }}>{explClusterError}</Alert>}
+        {explClusterResult && (() => {
+          const r = explClusterResult as any;
+          return (
+            <Box>
+              <Box sx={{ display: "flex", gap: 1, mb: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+                <Chip label={`${r.products_scraped} Produkte`} size="small" color="success" />
+                {r.products_failed > 0 && (
+                  <Chip label={`${r.products_failed} Fehler`} size="small" color="error" />
+                )}
+                <Typography variant="caption" color="text.secondary">
+                  {r.unique_asins} ASINs · {r.markets_count} Markets · {r.duration_s}s · {r.concurrency}x parallel
+                </Typography>
+              </Box>
+              {/* Summary table */}
+              <Box sx={{ mb: 2, p: 1.5, bgcolor: "action.hover", borderRadius: 1, fontSize: "0.78rem", fontFamily: "monospace" }}>
+                <Typography variant="caption" fontWeight={700} display="block" mb={0.5}>Zusammenfassung</Typography>
+                {r.markets && Object.entries(r.markets).map(([kw, data]: [string, any]) => (
+                  <Box key={kw}>
+                    {kw}: <strong>{data.count ?? 0} ASINs</strong> ({data.duration_s}s)
+                    {data.error && <span style={{ color: "#d32f2f" }}> — {data.error}</span>}
+                  </Box>
+                ))}
+                <Divider sx={{ my: 1 }} />
+                <Box>Produkte OK: <strong>{r.products_scraped}</strong> / Fehler: <strong>{r.products_failed}</strong></Box>
+                <Box>Felder-Abdeckung (von {r.products_scraped} OK-Produkten):</Box>
+                {r.products_scraped > 0 && (() => {
+                  const prods = r.products as any[];
+                  const fields = ["title", "price", "blm", "avg_rating", "ratings", "main_category", "main_category_rank", "store", "img_path"];
+                  return fields.map(f => {
+                    const count = prods.filter(p => p[f] != null).length;
+                    const pct = Math.round(count / prods.length * 100);
+                    return (
+                      <Box key={f} sx={{ pl: 1 }}>
+                        {f}: <strong>{count}/{prods.length}</strong> ({pct}%)
+                        <span style={{ color: pct >= 80 ? "#2e7d32" : pct >= 50 ? "#ed6c02" : "#d32f2f", fontWeight: 600, marginLeft: 8 }}>
+                          {pct >= 80 ? "GUT" : pct >= 50 ? "OK" : "SCHWACH"}
+                        </span>
+                      </Box>
+                    );
+                  });
+                })()}
+              </Box>
+              <JsonBox data={r} />
+            </Box>
+          );
+        })()}
       </Paper>
 
       <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5}>

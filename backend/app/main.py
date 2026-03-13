@@ -20,6 +20,7 @@ from app.api.stats import router as stats_router
 from app.api.daily import router as daily_router
 from app.api.health_monitor import router as health_monitor_router, start_scheduler
 from app.api.proxy_test import router as proxy_test_router
+from app.api.exploratory import router as exploratory_router
 from app.api.jobs import _init_jobs_from_db
 from app.db.error_log import init_db
 from app.db.job_store import init_db as init_job_db
@@ -62,3 +63,4 @@ app.include_router(stats_router)
 app.include_router(daily_router)
 app.include_router(health_monitor_router)
 app.include_router(proxy_test_router)
+app.include_router(exploratory_router)
