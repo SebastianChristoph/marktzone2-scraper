@@ -18,6 +18,7 @@ from app.db.daily_store import (
     start_session, update_session, complete_session,
     get_current_session, get_running_session, get_history, clear_history,
     log_daily_event, get_daily_log,
+    mark_session_blocked, is_session_blocked, unblock_session,
 )
 
 router = APIRouter(prefix="/daily", tags=["daily"])
@@ -183,6 +184,17 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
     All ASINs in the batch are scraped in parallel (throttled by Semaphore(4)).
     Never raises — failed ASINs are omitted from results.
     """
+    # Short-circuit: if a previous batch detected a full proxy blockade, reject immediately.
+    # This prevents batches from piling up in the asyncio queue when the C# client has
+    # already timed out and moved on to the next batch.
+    if is_session_blocked(req.session_id):
+        log_daily_event(
+            req.session_id,
+            f"Batch sofort abgelehnt — Session bereits blockiert ({len(req.asins)} ASINs übersprungen).",
+            level="warning", phase="product_scraping",
+        )
+        return {"results": [], "aborted": True}
+
     logger.info(f"[Daily] Scraping {len(req.asins)} ASINs for session {req.session_id[:8]}")
 
     tasks = [_scrape_product(asin) for asin in req.asins]
@@ -246,8 +258,9 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
     # #3: Detect proxy blockade — abort if ≥ 70% of batch failed
     aborted = False
     if error_rate >= 1.0:
+        mark_session_blocked(req.session_id)
         msg = (f"ASIN-Batch: 0/{len(req.asins)} OK — VOLLSTÄNDIGE BLOCKADE erkannt "
-               f"(100% Fehler). Session wird abgebrochen.")
+               f"(100% Fehler). Session blockiert, alle weiteren Batches werden sofort abgelehnt.")
         log_daily_event(req.session_id, msg, level="error", phase="product_scraping")
         aborted = True
     elif error_rate >= 0.7:
@@ -280,6 +293,7 @@ async def scrape_products(req: ScrapeProductsRequest) -> dict:
 @router.post("/session/complete", dependencies=[Depends(require_scraper_secret)])
 async def finish_daily_session(req: CompleteSessionRequest) -> dict:
     """Finalize the daily session with final stats."""
+    unblock_session(req.session_id)
     complete_session(
         req.session_id,
         status=req.status,

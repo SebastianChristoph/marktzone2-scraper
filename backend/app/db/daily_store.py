@@ -11,6 +11,29 @@ from app.db.adapter import USE_POSTGRES, PH, make_pg_conn, fetch_all, fetch_one,
 
 _local = threading.local()
 
+# In-memory set of session IDs where a full proxy blockade was detected.
+# Prevents new batch requests from queuing up when the proxy is dead.
+# Cleared on server restart (acceptable — the DB status handles long-lived cases).
+_blocked_sessions: set[str] = set()
+_blocked_lock = threading.Lock()
+
+
+def mark_session_blocked(session_id: str) -> None:
+    """Mark a session as proxy-blocked so subsequent batch calls return immediately."""
+    with _blocked_lock:
+        _blocked_sessions.add(session_id)
+
+
+def is_session_blocked(session_id: str) -> bool:
+    with _blocked_lock:
+        return session_id in _blocked_sessions
+
+
+def unblock_session(session_id: str) -> None:
+    """Remove block flag (called on session complete/clear)."""
+    with _blocked_lock:
+        _blocked_sessions.discard(session_id)
+
 
 def _conn():
     if not hasattr(_local, "conn") or _local.conn is None:
