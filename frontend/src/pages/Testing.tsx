@@ -239,7 +239,9 @@ export default function Testing() {
 
   async function pollJob(jobId: string) {
     try {
-      const res = await fetch(`/api/jobs/${jobId}`);
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        headers: { "X-Scraper-Secret": import.meta.env.VITE_SCRAPER_SECRET ?? "" },
+      });
       if (!res.ok) { stopPolling(); return; }
       const data = await res.json();
       setClusterStatus(data);
