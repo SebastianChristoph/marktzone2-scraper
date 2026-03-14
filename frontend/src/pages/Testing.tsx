@@ -75,6 +75,56 @@ function computeLtMetrics(results: LtTask[], wallMs: number | null) {
   };
 }
 
+function computeClusterMetrics(data: any) {
+  const errors: string[] = data.errors ?? [];
+  const results: { market_name: string; products: unknown[] }[] = data.results ?? [];
+  const markets: string[] = data.markets ?? [];
+  const captchas = errors.filter((e: string) => e.includes("CAPTCHA")).length;
+  const outOfStock = errors.filter((e: string) => e.includes("out_of_stock")).length;
+  const connFailed = errors.filter((e: string) => e.includes("Failed to connect") || e.includes("All connection attempts")).length;
+  const totalProducts = results.reduce((s, r) => s + r.products.length, 0);
+  const marketsWithData = results.filter(r => r.products.length > 0).length;
+  return {
+    marketsTotal: markets.length,
+    marketsWithData,
+    totalProducts,
+    errorsTotal: errors.length,
+    captchas,
+    outOfStock,
+    connFailed,
+    captchaRate: errors.length ? (captchas / errors.length * 100).toFixed(0) : "0",
+    successRate: markets.length ? (marketsWithData / markets.length * 100).toFixed(0) : "0",
+  };
+}
+
+function ClusterMetricsGrid({ data }: { data: any }) {
+  const m = computeClusterMetrics(data);
+  const rate = parseInt(m.successRate);
+  const items = [
+    { label: "Märkte erfolgreich", value: `${m.marketsWithData} / ${m.marketsTotal}`, color: rate >= 75 ? "success.main" : rate >= 50 ? "warning.main" : "error.main" },
+    { label: "Produkte gesamt", value: m.totalProducts.toString() },
+    { label: "Fehler gesamt", value: m.errorsTotal.toString(), color: m.errorsTotal > 0 ? "warning.main" : undefined },
+    { label: "CAPTCHA-Fehler", value: m.captchas.toString(), color: m.captchas > 0 ? "warning.main" : undefined },
+    { label: "CAPTCHA-Rate", value: `${m.captchaRate}%` },
+    { label: "Out of Stock", value: m.outOfStock.toString() },
+    { label: "Verbindungsfehler", value: m.connFailed.toString(), color: m.connFailed > 0 ? "error.main" : undefined },
+  ];
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))", gap: 1, mb: 2 }}>
+      {items.map(({ label, value, color }) => (
+        <Box key={label} sx={{ p: 1, bgcolor: "action.hover", borderRadius: 1 }}>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3, mb: 0.25 }}>
+            {label}
+          </Typography>
+          <Typography variant="subtitle2" fontWeight={700} sx={{ color: color ?? "text.primary" }}>
+            {value}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 function LtMetricsGrid({ m }: { m: NonNullable<ReturnType<typeof computeLtMetrics>> }) {
   const rate = parseFloat(m.successRate);
   const items: { label: string; value: string; color?: string }[] = [
@@ -249,9 +299,12 @@ export default function Testing() {
   const [clusterMarkets, setClusterMarkets] = useState(DEFAULT_MARKETS);
   const [clusterLoading, setClusterLoading] = useState(false);
   const [clusterError, setClusterError] = useState<string | null>(null);
+  const [clusterCopied, setClusterCopied] = useState(false);
   const [clusterStatus, setClusterStatus] = useState<{
     job_id: string; status: string;
     progress: { done: number; total: number }; errors: string[];
+    results?: { market_name: string; products: unknown[] }[];
+    markets?: string[];
   } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -620,17 +673,30 @@ export default function Testing() {
         {clusterError && <Alert severity="error" sx={{ mb: 1.5 }}>{clusterError}</Alert>}
         {clusterStatus && (
           <Box>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5, flexWrap: "wrap" }}>
               <Chip label={clusterStatus.status} color={statusColor(clusterStatus.status)} size="small" />
               <Typography variant="body2" color="text.secondary">
                 {clusterStatus.progress.done} / {clusterStatus.progress.total} Schritte
               </Typography>
               {clusterStatus.status === "running" && <CircularProgress size={14} />}
+              {clusterStatus.status === "completed" && (
+                <Button size="small" variant="outlined" sx={{ ml: "auto" }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(clusterStatus, null, 2));
+                    setClusterCopied(true);
+                    setTimeout(() => setClusterCopied(false), 2000);
+                  }}>
+                  {clusterCopied ? "Kopiert ✓" : "Copy Response"}
+                </Button>
+              )}
             </Box>
             {(clusterStatus.status === "pending" || clusterStatus.status === "running") && (
               <LinearProgress variant="determinate"
                 value={clusterStatus.progress.total ? (clusterStatus.progress.done / clusterStatus.progress.total) * 100 : 0}
                 sx={{ mb: 1.5, borderRadius: 1 }} />
+            )}
+            {clusterStatus.status === "completed" && (
+              <ClusterMetricsGrid data={clusterStatus} />
             )}
             <JsonBox data={clusterStatus} />
           </Box>
