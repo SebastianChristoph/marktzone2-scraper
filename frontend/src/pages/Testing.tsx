@@ -36,6 +36,18 @@ const PROD_DEFAULT_ASINS = [
   "B09M8CC8RD", "B0DP2S5X8N", "B0D2XSL28P",
 ].join("\n");
 
+type ClusterLtJob = {
+  index: number;
+  status: "completed" | "failed" | "timeout";
+  duration_s: number;
+  markets_total: number;
+  markets_with_data: number;
+  total_products: number;
+  captchas: number;
+  errors_total: number;
+  conn_failed: number;
+};
+
 type LtTask = {
   item: string;
   attempts: number;
@@ -119,6 +131,91 @@ function ClusterMetricsGrid({ data }: { data: any }) {
           <Typography variant="subtitle2" fontWeight={700} sx={{ color: color ?? "text.primary" }}>
             {value}
           </Typography>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function computeClusterLtMetrics(results: ClusterLtJob[], wallMs: number | null) {
+  if (!results.length) return null;
+  const completed = results.filter(r => r.status === "completed");
+  const durations = completed.map(r => r.duration_s).sort((a, b) => a - b);
+  const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const pct = (arr: number[], p: number) => arr.length ? arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] : null;
+  const totalProducts = results.reduce((s, r) => s + r.total_products, 0);
+  const totalCaptchas = results.reduce((s, r) => s + r.captchas, 0);
+  const totalErrors = results.reduce((s, r) => s + r.errors_total, 0);
+  return {
+    total: results.length,
+    completed: completed.length,
+    failed: results.length - completed.length,
+    successRate: (completed.length / results.length * 100).toFixed(1),
+    totalProducts,
+    avgProducts: completed.length ? (completed.reduce((s, r) => s + r.total_products, 0) / completed.length).toFixed(1) : "–",
+    avgMarketsWithData: completed.length ? (completed.reduce((s, r) => s + r.markets_with_data, 0) / completed.length).toFixed(1) : "–",
+    totalCaptchas,
+    captchaRate: totalErrors ? (totalCaptchas / totalErrors * 100).toFixed(0) : "0",
+    avgDuration: avg(durations)?.toFixed(0) ?? "–",
+    p50: pct(durations, 0.5)?.toFixed(0) ?? "–",
+    p95: pct(durations, 0.95)?.toFixed(0) ?? "–",
+    minDuration: durations.length ? durations[0].toFixed(0) : "–",
+    maxDuration: durations.length ? durations[durations.length - 1].toFixed(0) : "–",
+    wallTime: wallMs ? (wallMs / 1000 / 60).toFixed(1) : "–",
+  };
+}
+
+function ClusterLtMetricsGrid({ m }: { m: NonNullable<ReturnType<typeof computeClusterLtMetrics>> }) {
+  const rate = parseFloat(m.successRate);
+  const items = [
+    { label: "Erfolgsrate", value: `${m.successRate}%`, color: rate >= 70 ? "success.main" : rate >= 40 ? "warning.main" : "error.main" },
+    { label: "Erfolgreich", value: `${m.completed} / ${m.total}` },
+    { label: "Ø Produkte/Job", value: m.avgProducts },
+    { label: "Produkte gesamt", value: m.totalProducts.toString() },
+    { label: "Ø Märkte mit Daten", value: m.avgMarketsWithData },
+    { label: "CAPTCHA-Fehler", value: m.totalCaptchas.toString(), color: m.totalCaptchas > 0 ? "warning.main" : undefined },
+    { label: "CAPTCHA-Rate", value: `${m.captchaRate}%` },
+    { label: "Ø Dauer", value: `${m.avgDuration}s` },
+    { label: "P50 Dauer", value: `${m.p50}s` },
+    { label: "P95 Dauer", value: `${m.p95}s` },
+    { label: "Min / Max", value: `${m.minDuration}s / ${m.maxDuration}s` },
+    { label: "Gesamtzeit", value: `${m.wallTime}min` },
+  ];
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))", gap: 1, mb: 2 }}>
+      {items.map(({ label, value, color }) => (
+        <Box key={label} sx={{ p: 1, bgcolor: "action.hover", borderRadius: 1 }}>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3, mb: 0.25 }}>
+            {label}
+          </Typography>
+          <Typography variant="subtitle2" fontWeight={700} sx={{ color: color ?? "text.primary" }}>
+            {value}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function ClusterLtResultsList({ results }: { results: ClusterLtJob[] }) {
+  return (
+    <Box sx={{ maxHeight: 340, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+      {results.map((r, i) => (
+        <Box key={i} sx={{
+          display: "flex", alignItems: "center", gap: 1.5, px: 1.5, py: 0.75,
+          borderBottom: i < results.length - 1 ? "1px solid" : "none",
+          borderColor: "divider",
+          flexWrap: "wrap",
+          "&:hover": { bgcolor: "action.hover" },
+        }}>
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, bgcolor: r.status === "completed" ? "success.main" : "error.main" }} />
+          <Typography variant="caption" sx={{ fontFamily: "monospace", minWidth: 52, flexShrink: 0 }}>Job #{r.index}</Typography>
+          <Chip label={r.status} size="small" color={r.status === "completed" ? "success" : "error"} variant="outlined" sx={{ fontSize: "0.68rem", height: 18 }} />
+          <Typography variant="caption" color="text.secondary">{r.duration_s.toFixed(0)}s</Typography>
+          <Typography variant="caption">Märkte: <strong>{r.markets_with_data}/{r.markets_total}</strong></Typography>
+          <Typography variant="caption">Produkte: <strong>{r.total_products}</strong></Typography>
+          <Typography variant="caption" sx={{ color: r.captchas > 0 ? "warning.main" : "text.secondary" }}>CAPTCHAs: {r.captchas}</Typography>
+          {r.conn_failed > 0 && <Typography variant="caption" color="error.main">ConnFail: {r.conn_failed}</Typography>}
         </Box>
       ))}
     </Box>
@@ -446,6 +543,81 @@ export default function Testing() {
     }
     setLtProdWallMs(Date.now() - ltProdStartRef.current);
     setLtProdRunning(false);
+  }
+
+  // ── Cluster Load Test ─────────────────────────────────────────────────────
+  const [ltClusterMarkets, setLtClusterMarkets] = useState(DEFAULT_MARKETS);
+  const [ltClusterCount, setLtClusterCount] = useState(20);
+  const [ltClusterRunning, setLtClusterRunning] = useState(false);
+  const [ltClusterResults, setLtClusterResults] = useState<ClusterLtJob[]>([]);
+  const [ltClusterProgress, setLtClusterProgress] = useState({ done: 0, total: 0 });
+  const [ltClusterWallMs, setLtClusterWallMs] = useState<number | null>(null);
+  const ltClusterAbortRef = useRef(false);
+  const ltClusterStartRef = useRef(0);
+
+  async function runClusterLoadTest() {
+    ltClusterAbortRef.current = false;
+    const markets = ltClusterMarkets.split(",").map(m => m.trim()).filter(Boolean);
+    if (!markets.length) return;
+    setLtClusterRunning(true);
+    setLtClusterResults([]);
+    setLtClusterProgress({ done: 0, total: ltClusterCount });
+    setLtClusterWallMs(null);
+    ltClusterStartRef.current = Date.now();
+
+    const results: ClusterLtJob[] = [];
+
+    for (let i = 0; i < ltClusterCount && !ltClusterAbortRef.current; i++) {
+      const jobStart = Date.now();
+      let jobResult: ClusterLtJob = {
+        index: i + 1, status: "failed", duration_s: 0,
+        markets_total: markets.length, markets_with_data: 0,
+        total_products: 0, captchas: 0, errors_total: 0, conn_failed: 0,
+      };
+      try {
+        const createRes = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Scraper-Secret": import.meta.env.VITE_SCRAPER_SECRET ?? "" },
+          body: JSON.stringify({ cluster_id: 1, markets, max_asins_per_market: 25 }),
+        });
+        if (!createRes.ok) throw new Error(`HTTP ${createRes.status}`);
+        const { job_id } = await createRes.json();
+
+        const TIMEOUT = 8 * 60 * 1000;
+        let done = false;
+        while (!done && !ltClusterAbortRef.current && (Date.now() - jobStart) < TIMEOUT) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await fetch(`/api/jobs/${job_id}`, {
+            headers: { "X-Scraper-Secret": import.meta.env.VITE_SCRAPER_SECRET ?? "" },
+          });
+          if (!pollRes.ok) break;
+          const pollData = await pollRes.json();
+          if (pollData.status === "completed" || pollData.status === "failed") {
+            done = true;
+            const m = computeClusterMetrics(pollData);
+            jobResult = {
+              index: i + 1,
+              status: pollData.status as "completed" | "failed",
+              duration_s: (Date.now() - jobStart) / 1000,
+              markets_total: m.marketsTotal,
+              markets_with_data: m.marketsWithData,
+              total_products: m.totalProducts,
+              captchas: m.captchas,
+              errors_total: m.errorsTotal,
+              conn_failed: m.connFailed,
+            };
+          }
+        }
+        if (!done) jobResult = { ...jobResult, status: "timeout", duration_s: (Date.now() - jobStart) / 1000 };
+      } catch {
+        jobResult.duration_s = (Date.now() - jobStart) / 1000;
+      }
+      results.push(jobResult);
+      setLtClusterResults([...results]);
+      setLtClusterProgress({ done: i + 1, total: ltClusterCount });
+    }
+    setLtClusterWallMs(Date.now() - ltClusterStartRef.current);
+    setLtClusterRunning(false);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -791,6 +963,53 @@ export default function Testing() {
             <>
               {!ltProdRunning && <LtMetricsGrid m={m} />}
               <LtResultsList results={ltProdResults} />
+            </>
+          );
+        })()}
+      </Paper>
+
+      {/* Cluster Load Test */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 660 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Cluster Job — Last-Test</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Erstellt N vollständige Cluster-Jobs sequenziell und misst Erfolgsrate, Produktausbeute und CAPTCHA-Rate über alle Läufe.
+          Timeout pro Job: 8 min.
+        </Typography>
+        <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <TextField label="Markets (komma-separiert)" size="small" sx={{ flexGrow: 1, minWidth: 260 }}
+            value={ltClusterMarkets} onChange={e => setLtClusterMarkets(e.target.value)}
+            disabled={ltClusterRunning} />
+          <TextField label="Anzahl Jobs" size="small" type="number" sx={{ width: 110 }}
+            value={ltClusterCount}
+            onChange={e => setLtClusterCount(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+            disabled={ltClusterRunning}
+            inputProps={{ min: 1, max: 100 }} />
+        </Box>
+        <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+          <Button variant="contained" size="small" onClick={runClusterLoadTest}
+            disabled={ltClusterRunning || ltFpRunning || ltProdRunning}
+            startIcon={ltClusterRunning ? <CircularProgress size={14} color="inherit" /> : null}>
+            {ltClusterRunning ? `Läuft… (${ltClusterProgress.done}/${ltClusterProgress.total})` : "Test starten"}
+          </Button>
+          {ltClusterRunning && (
+            <Button variant="outlined" size="small" color="error"
+              onClick={() => { ltClusterAbortRef.current = true; }}>
+              Abbrechen
+            </Button>
+          )}
+        </Box>
+        {ltClusterProgress.total > 0 && (
+          <LinearProgress variant="determinate"
+            value={(ltClusterProgress.done / ltClusterProgress.total) * 100}
+            sx={{ mb: 2, borderRadius: 1 }} />
+        )}
+        {ltClusterResults.length > 0 && (() => {
+          const m = computeClusterLtMetrics(ltClusterResults, ltClusterWallMs);
+          if (!m) return null;
+          return (
+            <>
+              {!ltClusterRunning && <ClusterLtMetricsGrid m={m} />}
+              <ClusterLtResultsList results={ltClusterResults} />
             </>
           );
         })()}
