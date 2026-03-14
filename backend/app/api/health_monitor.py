@@ -31,16 +31,25 @@ _PROXY_TIMEOUT = 15
 
 
 def _proxy_check_sync() -> dict:
-    """Quick proxy sanity check via requests (no Playwright). Returns ok + details."""
-    proxy = get_proxy()  # uses US by default
-    if not proxy:
-        return {"ok": False, "error": "WEBSHARE_PROXY_URL not set", "exit_ip": None, "amazon_status": None}
-
-    server = proxy["server"]
-    scheme = server.split("://")[0]
-    host_port = server.split("://")[1]
-    proxy_url = f"{scheme}://{proxy['username']}:{proxy['password']}@{host_port}/"
-    proxies = {"http": proxy_url, "https": proxy_url}
+    """Quick proxy sanity check via requests (no Playwright). Returns ok + details.
+    Prefers DC_PROXY_LIST if set, falls back to WEBSHARE_PROXY_URL (residential)."""
+    import os, random as _random
+    dc_list = os.getenv("DC_PROXY_LIST", "").strip()
+    if dc_list:
+        dc_proxies_raw = [p.strip() for p in dc_list.split(",") if p.strip()]
+        proxy_url = _random.choice(dc_proxies_raw)
+        proxies = {"http": proxy_url, "https": proxy_url}
+        proxy_label = proxy_url.split("@")[-1] if "@" in proxy_url else proxy_url  # host:port only
+    else:
+        proxy = get_proxy()  # uses US by default (residential)
+        if not proxy:
+            return {"ok": False, "error": "No proxy configured (DC_PROXY_LIST and WEBSHARE_PROXY_URL both unset)", "exit_ip": None, "amazon_status": None}
+        server = proxy["server"]
+        scheme = server.split("://")[0]
+        host_port = server.split("://")[1]
+        proxy_url = f"{scheme}://{proxy['username']}:{proxy['password']}@{host_port}/"
+        proxies = {"http": proxy_url, "https": proxy_url}
+        proxy_label = proxy["username"]
 
     # Direct IP
     direct_ip = None
@@ -82,7 +91,7 @@ def _proxy_check_sync() -> dict:
 
     return {
         "ok": ok,
-        "username": proxy["username"],
+        "username": proxy_label,
         "direct_ip": direct_ip,
         "exit_ip": exit_ip,
         "ip_error": ip_error,
