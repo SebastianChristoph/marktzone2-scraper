@@ -9,10 +9,135 @@ import {
   LinearProgress,
   Paper,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 
 const DEFAULT_MARKETS = "creatine,protein powder,yoga mat,resistance bands";
+
+const FP_DEFAULT_KEYWORDS = [
+  "gaming chair", "standing desk", "protein powder", "creatine", "yoga mat",
+  "resistance bands", "coffee maker", "air fryer", "blender", "phone stand",
+  "cable organizer", "desk lamp", "laptop stand", "water bottle", "earbuds",
+  "smartwatch", "backpack", "sunglasses", "foam roller", "mouse pad",
+].join("\n");
+
+const PROD_DEFAULT_ASINS = [
+  "B0F5WZ4V5N", "B0CTNWBT1Z", "B0FXMWY914", "B0GFWLY9BF", "B01M5KZTAQ",
+  "B07ZPKN6YR", "B08N5WRWNW", "B09G9FPHY6", "B0C1H26C8N", "B0BZHR9NPD",
+].join("\n");
+
+type LtTask = {
+  item: string;
+  attempts: number;
+  success: boolean;
+  duration_s: number | null;
+  captchas: number;
+  empties: number;
+  error: string | null;
+};
+
+function computeLtMetrics(results: LtTask[], wallMs: number | null) {
+  if (!results.length) return null;
+  const succ = results.filter(r => r.success);
+  const durations = succ.map(r => r.duration_s!).sort((a, b) => a - b);
+  const totalAttempts = results.reduce((s, r) => s + r.attempts, 0);
+  const totalCaptchas = results.reduce((s, r) => s + r.captchas, 0);
+  const totalEmpties = results.reduce((s, r) => s + r.empties, 0);
+  const avgArr = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const pct = (arr: number[], p: number) =>
+    arr.length ? arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] : null;
+  return {
+    total: results.length,
+    successful: succ.length,
+    failed: results.length - succ.length,
+    successRate: (succ.length / results.length * 100).toFixed(1),
+    totalAttempts,
+    totalCaptchas,
+    totalEmpties,
+    captchaRate: totalAttempts ? (totalCaptchas / totalAttempts * 100).toFixed(1) : "0",
+    avgAttempts: succ.length ? (succ.reduce((s, r) => s + r.attempts, 0) / succ.length).toFixed(1) : "–",
+    avgDuration: avgArr(durations)?.toFixed(2) ?? "–",
+    p50: pct(durations, 0.5)?.toFixed(2) ?? "–",
+    p95: pct(durations, 0.95)?.toFixed(2) ?? "–",
+    minDuration: durations.length ? durations[0].toFixed(2) : "–",
+    maxDuration: durations.length ? durations[durations.length - 1].toFixed(2) : "–",
+    wallTime: wallMs ? (wallMs / 1000).toFixed(1) : "–",
+  };
+}
+
+function LtMetricsGrid({ m }: { m: NonNullable<ReturnType<typeof computeLtMetrics>> }) {
+  const rate = parseFloat(m.successRate);
+  const items: { label: string; value: string; color?: string }[] = [
+    { label: "Erfolgsrate", value: `${m.successRate}%`, color: rate >= 70 ? "success.main" : rate >= 40 ? "warning.main" : "error.main" },
+    { label: "Erfolgreich", value: `${m.successful} / ${m.total}` },
+    { label: "Fehlgeschlagen", value: m.failed.toString(), color: m.failed > 0 ? "error.main" : undefined },
+    { label: "Captchas gesamt", value: m.totalCaptchas.toString(), color: m.totalCaptchas > 0 ? "warning.main" : undefined },
+    { label: "Captcha-Rate", value: `${m.captchaRate}%` },
+    { label: "Leere Ergebnisse", value: m.totalEmpties.toString() },
+    { label: "Ø Versuche/Hit", value: m.avgAttempts },
+    { label: "Ø Dauer", value: `${m.avgDuration}s` },
+    { label: "P50 Dauer", value: `${m.p50}s` },
+    { label: "P95 Dauer", value: `${m.p95}s` },
+    { label: "Min / Max", value: `${m.minDuration}s / ${m.maxDuration}s` },
+    { label: "Gesamtzeit", value: `${m.wallTime}s` },
+  ];
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))", gap: 1, mb: 2 }}>
+      {items.map(({ label, value, color }) => (
+        <Box key={label} sx={{ p: 1, bgcolor: "action.hover", borderRadius: 1 }}>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.3, mb: 0.25 }}>
+            {label}
+          </Typography>
+          <Typography variant="subtitle2" fontWeight={700} sx={{ color: color ?? "text.primary" }}>
+            {value}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function LtResultsList({ results }: { results: LtTask[] }) {
+  return (
+    <Box sx={{ maxHeight: 280, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+      {results.map((r, i) => (
+        <Box key={i} sx={{
+          display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.5,
+          borderBottom: i < results.length - 1 ? "1px solid" : "none",
+          borderColor: "divider",
+          "&:hover": { bgcolor: "action.hover" },
+        }}>
+          <Box sx={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, bgcolor: r.success ? "success.main" : "error.main" }} />
+          <Typography variant="caption" sx={{
+            fontFamily: "monospace", flexGrow: 1, minWidth: 0,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.72rem",
+          }}>
+            {r.item}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, fontSize: "0.68rem", minWidth: 22, textAlign: "right" }}>
+            {r.attempts}x
+          </Typography>
+          {r.captchas > 0 && (
+            <Tooltip title={`${r.captchas} CAPTCHA(s)`} placement="left">
+              <Chip label={`${r.captchas}C`} size="small" color="warning"
+                sx={{ height: 15, fontSize: "0.62rem", flexShrink: 0, "& .MuiChip-label": { px: 0.75 } }} />
+            </Tooltip>
+          )}
+          {r.success && r.duration_s !== null ? (
+            <Typography variant="caption" sx={{ flexShrink: 0, fontSize: "0.68rem", fontFamily: "monospace", color: "text.secondary", minWidth: 34, textAlign: "right" }}>
+              {r.duration_s.toFixed(1)}s
+            </Typography>
+          ) : (
+            <Typography variant="caption" sx={{ flexShrink: 0, fontSize: "0.68rem", color: "error.main", minWidth: 34, textAlign: "right" }}>
+              {r.error ?? "err"}
+            </Typography>
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
+}
 
 const JsonBox = ({ data }: { data: unknown }) => (
   <Box component="pre" sx={{ m: 0, p: 1.5, bgcolor: "action.hover", borderRadius: 1, fontSize: "0.78rem", overflowX: "auto" }}>
@@ -131,6 +256,104 @@ export default function Testing() {
     finally { setClusterLoading(false); }
   }
 
+  // ── Load Tests ────────────────────────────────────────────────────────────
+  const [ltFpKw, setLtFpKw] = useState(FP_DEFAULT_KEYWORDS);
+  const [ltFpRunning, setLtFpRunning] = useState(false);
+  const [ltFpResults, setLtFpResults] = useState<LtTask[]>([]);
+  const [ltFpProgress, setLtFpProgress] = useState({ done: 0, total: 0 });
+  const [ltFpWallMs, setLtFpWallMs] = useState<number | null>(null);
+  const ltFpAbortRef = useRef(false);
+  const ltFpStartRef = useRef(0);
+
+  const [ltProdAsin, setLtProdAsin] = useState(PROD_DEFAULT_ASINS);
+  const [ltProdRunning, setLtProdRunning] = useState(false);
+  const [ltProdResults, setLtProdResults] = useState<LtTask[]>([]);
+  const [ltProdProgress, setLtProdProgress] = useState({ done: 0, total: 0 });
+  const [ltProdWallMs, setLtProdWallMs] = useState<number | null>(null);
+  const ltProdAbortRef = useRef(false);
+  const ltProdStartRef = useRef(0);
+
+  async function fetchWithRetry(
+    type: "fp" | "prod",
+    item: string,
+    maxRetries: number,
+    abortRef: { current: boolean },
+  ): Promise<LtTask> {
+    let attempts = 0, captchas = 0, empties = 0;
+    let lastError: string | null = null, lastDuration: number | null = null;
+
+    while (attempts < maxRetries && !abortRef.current) {
+      attempts++;
+      const t0 = Date.now();
+      try {
+        const endpoint = type === "fp" ? "/api/scraper/first-page" : "/api/scraper/product";
+        const body = type === "fp" ? { keyword: item } : { asin: item };
+        const res = await fetch(endpoint, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        lastDuration = (Date.now() - t0) / 1000;
+        if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
+        const data = await res.json();
+
+        if (data.error === "CAPTCHA detected") { captchas++; lastError = "CAPTCHA"; continue; }
+        if (data.error) { lastError = data.error; continue; }
+        if (type === "fp" && (!data.products || data.products.length === 0)) { empties++; lastError = "empty"; continue; }
+
+        return { item, attempts, success: true, duration_s: lastDuration, captchas, empties, error: null };
+      } catch (e) {
+        lastDuration = (Date.now() - t0) / 1000;
+        lastError = e instanceof Error ? e.message : "error";
+      }
+    }
+    return { item, attempts, success: false, duration_s: lastDuration, captchas, empties, error: lastError };
+  }
+
+  async function runFpLoadTest() {
+    ltFpAbortRef.current = false;
+    const items = ltFpKw.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!items.length) return;
+    setLtFpRunning(true);
+    setLtFpResults([]);
+    setLtFpProgress({ done: 0, total: items.length });
+    setLtFpWallMs(null);
+    ltFpStartRef.current = Date.now();
+
+    const results: LtTask[] = [];
+    for (let i = 0; i < items.length && !ltFpAbortRef.current; i += 5) {
+      const batch = items.slice(i, i + 5);
+      const br = await Promise.all(batch.map(it => fetchWithRetry("fp", it, 5, ltFpAbortRef)));
+      results.push(...br);
+      setLtFpResults([...results]);
+      setLtFpProgress({ done: results.length, total: items.length });
+    }
+    setLtFpWallMs(Date.now() - ltFpStartRef.current);
+    setLtFpRunning(false);
+  }
+
+  async function runProdLoadTest() {
+    ltProdAbortRef.current = false;
+    const items = ltProdAsin.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!items.length) return;
+    setLtProdRunning(true);
+    setLtProdResults([]);
+    setLtProdProgress({ done: 0, total: items.length });
+    setLtProdWallMs(null);
+    ltProdStartRef.current = Date.now();
+
+    const results: LtTask[] = [];
+    for (let i = 0; i < items.length && !ltProdAbortRef.current; i += 5) {
+      const batch = items.slice(i, i + 5);
+      const br = await Promise.all(batch.map(it => fetchWithRetry("prod", it, 5, ltProdAbortRef)));
+      results.push(...br);
+      setLtProdResults([...results]);
+      setLtProdProgress({ done: results.length, total: items.length });
+    }
+    setLtProdWallMs(Date.now() - ltProdStartRef.current);
+    setLtProdRunning(false);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <Box>
       <Typography variant="h4" fontWeight={700} mb={4}>Testing</Typography>
@@ -342,6 +565,99 @@ export default function Testing() {
             <JsonBox data={clusterStatus} />
           </Box>
         )}
+      </Paper>
+
+      {/* ── Last-Tests ──────────────────────────────────────────────────────── */}
+      <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.5} mt={5} display="block">
+        Last-Tests — Qualitätsmessung
+      </Typography>
+      <Divider sx={{ mb: 1.5, mt: 0.5 }} />
+      <Typography variant="caption" color="text.secondary" display="block" mb={3} maxWidth={620}>
+        Führt alle eingetragenen Keywords / ASINs aus (5 parallel, max. 5 Retries je Anfrage).
+        Bei CAPTCHA oder leerem Ergebnis wird automatisch mit neuem Proxy-Call wiederholt — kein Solving-Service.
+        Ergibt Erfolgsrate, Captcha-Frequenz, Retry-Bedarf und Latenzverteilung.
+      </Typography>
+
+      {/* First Page Load Test */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 660 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>First Page — Last-Test</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Ein Keyword pro Zeile · {ltFpKw.split("\n").filter(Boolean).length} Keywords geladen
+        </Typography>
+        <TextField multiline rows={6} size="small" fullWidth
+          value={ltFpKw} onChange={e => setLtFpKw(e.target.value)}
+          disabled={ltFpRunning}
+          inputProps={{ style: { fontFamily: "monospace", fontSize: "0.78rem" } }}
+          sx={{ mb: 2 }} />
+        <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+          <Button variant="contained" size="small" onClick={runFpLoadTest}
+            disabled={ltFpRunning || ltProdRunning}
+            startIcon={ltFpRunning ? <CircularProgress size={14} color="inherit" /> : null}>
+            {ltFpRunning ? `Läuft… (${ltFpProgress.done}/${ltFpProgress.total})` : "Test starten"}
+          </Button>
+          {ltFpRunning && (
+            <Button variant="outlined" size="small" color="error"
+              onClick={() => { ltFpAbortRef.current = true; }}>
+              Abbrechen
+            </Button>
+          )}
+        </Box>
+        {ltFpProgress.total > 0 && (
+          <LinearProgress variant="determinate"
+            value={(ltFpProgress.done / ltFpProgress.total) * 100}
+            sx={{ mb: 2, borderRadius: 1 }} />
+        )}
+        {ltFpResults.length > 0 && (() => {
+          const m = computeLtMetrics(ltFpResults, ltFpWallMs);
+          if (!m) return null;
+          return (
+            <>
+              {!ltFpRunning && <LtMetricsGrid m={m} />}
+              <LtResultsList results={ltFpResults} />
+            </>
+          );
+        })()}
+      </Paper>
+
+      {/* Product Load Test */}
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, maxWidth: { xs: "100%", sm: 660 }, mb: 4 }}>
+        <Typography variant="subtitle1" fontWeight={600} mb={0.5}>Product Scraper — Last-Test</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+          Eine ASIN pro Zeile · {ltProdAsin.split("\n").filter(Boolean).length} ASINs geladen
+        </Typography>
+        <TextField multiline rows={6} size="small" fullWidth
+          value={ltProdAsin} onChange={e => setLtProdAsin(e.target.value)}
+          disabled={ltProdRunning}
+          inputProps={{ style: { fontFamily: "monospace", fontSize: "0.78rem" } }}
+          sx={{ mb: 2 }} />
+        <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+          <Button variant="contained" size="small" onClick={runProdLoadTest}
+            disabled={ltFpRunning || ltProdRunning}
+            startIcon={ltProdRunning ? <CircularProgress size={14} color="inherit" /> : null}>
+            {ltProdRunning ? `Läuft… (${ltProdProgress.done}/${ltProdProgress.total})` : "Test starten"}
+          </Button>
+          {ltProdRunning && (
+            <Button variant="outlined" size="small" color="error"
+              onClick={() => { ltProdAbortRef.current = true; }}>
+              Abbrechen
+            </Button>
+          )}
+        </Box>
+        {ltProdProgress.total > 0 && (
+          <LinearProgress variant="determinate"
+            value={(ltProdProgress.done / ltProdProgress.total) * 100}
+            sx={{ mb: 2, borderRadius: 1 }} />
+        )}
+        {ltProdResults.length > 0 && (() => {
+          const m = computeLtMetrics(ltProdResults, ltProdWallMs);
+          if (!m) return null;
+          return (
+            <>
+              {!ltProdRunning && <LtMetricsGrid m={m} />}
+              <LtResultsList results={ltProdResults} />
+            </>
+          );
+        })()}
       </Paper>
     </Box>
   );
