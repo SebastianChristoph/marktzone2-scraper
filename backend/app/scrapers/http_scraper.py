@@ -59,25 +59,22 @@ def _init_proxies() -> None:
         return
     _proxy_initialized = True
 
-    # Option 1: Webshare API — auto-fetch all DC proxies
-    api_key = os.getenv("WEBSHARE_API_KEY", "").strip()
-    if api_key:
+    # Option 1: Webshare download URL — format: IP:Port:User:Pass per line
+    download_url = os.getenv("WEBSHARE_PROXY_DOWNLOAD_URL", "").strip()
+    if download_url:
         try:
             import requests as _req
-            resp = _req.get(
-                "https://proxy.webshare.io/api/v2/proxy/list/?page=1&page_size=500",
-                headers={"Authorization": f"Token {api_key}"},
-                timeout=10,
-            )
+            resp = _req.get(download_url, timeout=10)
             resp.raise_for_status()
-            for p in resp.json().get("results", []):
-                if p.get("valid", True):
-                    url = f"http://{p['username']}:{p['password']}@{p['proxy_address']}:{p['port']}"
-                    _proxy_pool.append(url)
-            logger.info(f"[HTTP] Loaded {len(_proxy_pool)} DC proxies from Webshare API")
+            for line in resp.text.strip().splitlines():
+                parts = line.strip().split(":")
+                if len(parts) == 4:
+                    ip, port, user, pw = parts
+                    _proxy_pool.append(f"http://{user}:{pw}@{ip}:{port}")
+            logger.info(f"[HTTP] Loaded {len(_proxy_pool)} DC proxies from Webshare download URL")
             return
         except Exception as e:
-            logger.warning(f"[HTTP] Webshare API fetch failed: {e} — falling back to DC_PROXY_LIST")
+            logger.warning(f"[HTTP] Webshare download URL fetch failed: {e} — falling back to DC_PROXY_LIST")
 
     # Option 2: Explicit comma-separated list
     proxy_list = os.getenv("DC_PROXY_LIST", "").strip()
