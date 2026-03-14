@@ -296,11 +296,15 @@ export default function Testing() {
         if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
         const data = await res.json();
 
-        if (data.error === "CAPTCHA detected") { captchas++; lastError = "CAPTCHA"; continue; }
-        if (data.error) { lastError = data.error; continue; }
-        if (type === "fp" && (!data.products || data.products.length === 0)) { empties++; lastError = "empty"; continue; }
+        if (data.error === "CAPTCHA detected") { captchas++; lastError = "CAPTCHA"; }
+        else if (data.error) { lastError = data.error; }
+        else if (type === "fp" && (!data.products || data.products.length === 0)) { empties++; lastError = "empty"; }
+        else { return { item, attempts, success: true, duration_s: lastDuration, captchas, empties, error: null }; }
 
-        return { item, attempts, success: true, duration_s: lastDuration, captchas, empties, error: null };
+        // Delay before retry — avoid hammering the same IP immediately
+        if (attempts < maxRetries && !abortRef.current) {
+          await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+        }
       } catch (e) {
         lastDuration = (Date.now() - t0) / 1000;
         lastError = e instanceof Error ? e.message : "error";
@@ -342,8 +346,8 @@ export default function Testing() {
     ltProdStartRef.current = Date.now();
 
     const results: LtTask[] = [];
-    for (let i = 0; i < items.length && !ltProdAbortRef.current; i += 5) {
-      const batch = items.slice(i, i + 5);
+    for (let i = 0; i < items.length && !ltProdAbortRef.current; i += 2) {
+      const batch = items.slice(i, i + 2);
       const br = await Promise.all(batch.map(it => fetchWithRetry("prod", it, 5, ltProdAbortRef)));
       results.push(...br);
       setLtProdResults([...results]);
@@ -396,6 +400,34 @@ export default function Testing() {
                 &nbsp;·&nbsp; Pool: <strong>{String(r.proxy_count ?? "–")} Proxies</strong>
                 &nbsp;·&nbsp; Getestet: <strong>{results.length}</strong>
               </Typography>
+              {r.rotation && (() => {
+                const rot = r.rotation as any;
+                return (
+                  <Box sx={{ mb: 2, p: 1.5, bgcolor: "action.hover", borderRadius: 1 }}>
+                    <Typography variant="caption" fontWeight={700} display="block" mb={0.5}>
+                      IP-Rotation ({rot.requests_sent} Anfragen)
+                    </Typography>
+                    <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+                      <Chip
+                        label={rot.rotates ? "✓ Rotiert" : rot.sticky ? "⚠ Sticky (gleiche IP)" : "? Unbekannt"}
+                        size="small"
+                        color={rot.rotates ? "success" : "warning"}
+                        sx={{ fontSize: "0.7rem" }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        {rot.responses}/{rot.requests_sent} Antworten ·{" "}
+                        {rot.unique_ips.length} unique IP{rot.unique_ips.length !== 1 ? "s" : ""}
+                        {rot.failed > 0 ? ` · ${rot.failed} Fehler` : ""}
+                      </Typography>
+                    </Box>
+                    {rot.unique_ips.length > 0 && (
+                      <Typography variant="caption" sx={{ fontFamily: "monospace", display: "block", mt: 0.5, color: "text.secondary" }}>
+                        {rot.unique_ips.join(" · ")}
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              })()}
               {results.map((v: any, i: number) => (
                 <Box key={i} sx={{ mb: 2, pb: 2, borderBottom: i < results.length - 1 ? "1px solid" : "none", borderColor: "divider" }}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>

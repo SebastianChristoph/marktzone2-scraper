@@ -249,6 +249,10 @@ async def scrape_first_page_http(keyword: str) -> dict:
 async def scrape_product_http(asin: str) -> dict:
     """Scrape Amazon product detail page using raw HTTP. Returns product data dict."""
     url = f"https://www.amazon.com/dp/{asin}?language=en_US"
+
+    # Jitter: randomise request timing to avoid simultaneous hits on the same IP
+    await asyncio.sleep(random.uniform(0.3, 1.5))
+
     t0 = time.monotonic()
     proxy_used = _get_proxy() is not None
 

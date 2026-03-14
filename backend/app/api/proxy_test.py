@@ -17,6 +17,30 @@ _AMAZON_CHECK_URL = "http://www.amazon.com/robots.txt"
 _TIMEOUT = 15
 
 
+def _check_rotation(proxy_url: str, n: int = 5) -> dict:
+    """Make n sequential requests through the same proxy URL and compare exit IPs."""
+    proxies = {"http": proxy_url, "https": proxy_url}
+    ips: list[str] = []
+    for _ in range(n):
+        try:
+            r = req.get(_IP_CHECK_URL, proxies=proxies, timeout=8)
+            if r.status_code == 200:
+                ip = r.json().get("ip")
+                if ip:
+                    ips.append(ip)
+        except Exception:
+            pass
+    unique = list(dict.fromkeys(ips))
+    return {
+        "requests_sent": n,
+        "responses": len(ips),
+        "unique_ips": unique,
+        "rotates": len(unique) > 1,
+        "sticky": len(unique) == 1,
+        "failed": n - len(ips),
+    }
+
+
 def _check_proxy(proxy_url: str, direct_ip: str | None) -> dict:
     proxies = {"http": proxy_url, "https": proxy_url}
     host = proxy_url.split("@")[-1] if "@" in proxy_url else proxy_url
@@ -90,10 +114,14 @@ async def run_proxy_test() -> dict:
 
     results = [_check_proxy(p, direct_ip) for p in sample]
 
+    # Rotation check: use first proxy, make 5 sequential calls, compare exit IPs
+    rotation = _check_rotation(all_proxies[0])
+
     return {
         "proxy_configured": True,
         "proxy_count": len(all_proxies),
         "direct_ip": direct_ip,
         "results": results,
         "all_ok": all(r["ok"] for r in results),
+        "rotation": rotation,
     }
