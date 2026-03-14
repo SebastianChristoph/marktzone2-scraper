@@ -65,7 +65,7 @@ def _init_proxies() -> None:
         try:
             import requests as _req
             resp = _req.get(
-                "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=500",
+                "https://proxy.webshare.io/api/v2/proxy/list/?page=1&page_size=500",
                 headers={"Authorization": f"Token {api_key}"},
                 timeout=10,
             )
