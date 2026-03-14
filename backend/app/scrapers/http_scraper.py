@@ -1,10 +1,12 @@
 """
-Raw HTTP scrapers — no Playwright, no browser, no proxy.
+Raw HTTP scrapers — no Playwright, no browser.
 Uses httpx (async) + BeautifulSoup for HTML parsing.
+Supports optional datacenter proxy rotation via DC_PROXY_LIST env var.
 Drop-in replacement for first_page_scraper.py and product_scraper.py.
 """
 import asyncio
 import logging
+import os
 import random
 import re
 import time
@@ -35,6 +37,72 @@ _DEFAULT_HEADERS = {
     "Sec-Fetch-User": "?1",
     "DNT": "1",
 }
+
+# ── Proxy Pool ───────────────────────────────────────────────────────────────
+#
+# Set DC_PROXY_LIST in .env as comma-separated proxy URLs:
+#   DC_PROXY_LIST=http://user:pass@ip1:port,http://user:pass@ip2:port,...
+#
+# Or for Webshare-style rotating proxy (single endpoint, random session):
+#   DC_PROXY_URL=http://user:pass@proxy.host:port
+#   DC_PROXY_SESSIONS=50  (number of rotating sessions, default 10)
+#
+# If neither is set, requests go direct (no proxy).
+
+_proxy_pool: list[str] = []
+_proxy_initialized = False
+
+
+def _init_proxies() -> None:
+    global _proxy_pool, _proxy_initialized
+    if _proxy_initialized:
+        return
+    _proxy_initialized = True
+
+    # Option 1: Explicit proxy list
+    proxy_list = os.getenv("DC_PROXY_LIST", "").strip()
+    if proxy_list:
+        _proxy_pool = [p.strip() for p in proxy_list.split(",") if p.strip()]
+        logger.info(f"[HTTP] Loaded {len(_proxy_pool)} DC proxies from DC_PROXY_LIST")
+        return
+
+    # Option 2: Single rotating endpoint with session count
+    proxy_url = os.getenv("DC_PROXY_URL", "").strip()
+    if proxy_url:
+        sessions = int(os.getenv("DC_PROXY_SESSIONS", "10"))
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+        base_user = parsed.username or ""
+        for i in range(1, sessions + 1):
+            # Append session number to username: user-s1, user-s2, ...
+            session_url = proxy_url.replace(
+                f"{base_user}:{parsed.password}@",
+                f"{base_user}-s{i}:{parsed.password}@"
+            )
+            _proxy_pool.append(session_url)
+        logger.info(f"[HTTP] Generated {len(_proxy_pool)} proxy sessions from DC_PROXY_URL")
+        return
+
+    logger.info("[HTTP] No DC proxy configured — requests go direct")
+
+
+def _get_proxy() -> Optional[str]:
+    """Return a random proxy URL from the pool, or None if no proxies configured."""
+    _init_proxies()
+    if not _proxy_pool:
+        return None
+    return random.choice(_proxy_pool)
+
+
+def _make_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    """Create an httpx client with optional proxy."""
+    proxy = _get_proxy()
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=timeout,
+        proxy=proxy,
+    )
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +191,8 @@ async def scrape_first_page_http(keyword: str) -> dict:
     url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
     t0 = time.monotonic()
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+    proxy_used = _get_proxy() is not None
+    async with _make_client() as client:
         resp = await client.get(url, headers=_make_headers())
 
     duration = round(time.monotonic() - t0, 2)
@@ -133,14 +202,14 @@ async def scrape_first_page_http(keyword: str) -> dict:
         return {
             "keyword": keyword, "products": [], "count": 0,
             "error": f"HTTP {resp.status_code}",
-            "duration_s": duration, "method": "raw_http",
+            "duration_s": duration, "method": "raw_http", "proxy": proxy_used,
         }
 
     if _is_captcha(html):
         return {
             "keyword": keyword, "products": [], "count": 0,
             "error": "CAPTCHA detected",
-            "duration_s": duration, "method": "raw_http",
+            "duration_s": duration, "method": "raw_http", "proxy": proxy_used,
         }
 
     soup = BeautifulSoup(html, "lxml")
@@ -171,6 +240,7 @@ async def scrape_first_page_http(keyword: str) -> dict:
         "duration_s": duration,
         "method": "raw_http",
         "http_status": resp.status_code,
+        "proxy": proxy_used,
     }
 
 
@@ -180,21 +250,22 @@ async def scrape_product_http(asin: str) -> dict:
     """Scrape Amazon product detail page using raw HTTP. Returns product data dict."""
     url = f"https://www.amazon.com/dp/{asin}?language=en_US"
     t0 = time.monotonic()
+    proxy_used = _get_proxy() is not None
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+    async with _make_client() as client:
         resp = await client.get(url, headers=_make_headers())
 
     duration = round(time.monotonic() - t0, 2)
     html = resp.text
 
     if resp.status_code != 200:
-        return {"asin": asin, "error": f"HTTP {resp.status_code}", "duration_s": duration, "method": "raw_http"}
+        return {"asin": asin, "error": f"HTTP {resp.status_code}", "duration_s": duration, "method": "raw_http", "proxy": proxy_used}
 
     if _is_captcha(html):
-        return {"asin": asin, "error": "CAPTCHA detected", "duration_s": duration, "method": "raw_http"}
+        return {"asin": asin, "error": "CAPTCHA detected", "duration_s": duration, "method": "raw_http", "proxy": proxy_used}
 
     if _is_out_of_stock(html):
-        return {"asin": asin, "error": "out_of_stock_or_no_page", "duration_s": duration, "method": "raw_http"}
+        return {"asin": asin, "error": "out_of_stock_or_no_page", "duration_s": duration, "method": "raw_http", "proxy": proxy_used}
 
     soup = BeautifulSoup(html, "lxml")
 
@@ -235,6 +306,7 @@ async def scrape_product_http(asin: str) -> dict:
         "duration_s": duration,
         "method": "raw_http",
         "http_status": resp.status_code,
+        "proxy": proxy_used,
     }
 
 
