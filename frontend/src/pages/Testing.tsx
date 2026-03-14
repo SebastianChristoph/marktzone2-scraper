@@ -20,6 +20,15 @@ const FP_DEFAULT_KEYWORDS = [
   "resistance bands", "coffee maker", "air fryer", "blender", "phone stand",
   "cable organizer", "desk lamp", "laptop stand", "water bottle", "earbuds",
   "smartwatch", "backpack", "sunglasses", "foam roller", "mouse pad",
+  "wireless charger", "ring light", "monitor stand", "keyboard wrist rest", "usb hub",
+  "electric kettle", "french press", "pour over coffee", "reusable water bottle", "lunch box",
+  "bamboo cutting board", "cast iron skillet", "instant pot", "food scale", "salad spinner",
+  "knee brace", "compression socks", "massage gun", "pull up bar", "jump rope",
+  "whey protein", "pre workout", "omega 3", "vitamin d", "collagen powder",
+  "dog collar", "cat tree", "pet water fountain", "dog leash", "cat toy",
+  "led strip lights", "smart plug", "motion sensor light", "door lock", "security camera",
+  "travel pillow", "packing cubes", "luggage scale", "passport holder", "money belt",
+  "drawing tablet", "webcam", "blue light glasses", "standing mat", "monitor arm",
 ].join("\n");
 
 const PROD_DEFAULT_ASINS = [
