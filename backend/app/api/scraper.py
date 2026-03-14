@@ -10,31 +10,14 @@ class FirstPageRequest(BaseModel):
     keyword: str
 
 
-class ScrapedProduct(BaseModel):
-    asin: str
-
-
-class FirstPageResponse(BaseModel):
-    keyword: str
-    count: int
-    products: list[ScrapedProduct]
-    suggestions: list[str]
-
-
 class ProductRequest(BaseModel):
     asin: str
 
 
-@router.post("/first-page", response_model=FirstPageResponse)
-async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
+@router.post("/first-page")
+async def scrape_first_page(request: FirstPageRequest):
     result = await scrape_first_page_http(request.keyword)
-    products = result.get("products", [])
-    return FirstPageResponse(
-        keyword=request.keyword,
-        count=len(products),
-        products=[ScrapedProduct(**p) for p in products],
-        suggestions=result.get("suggestions", []),
-    )
+    return result
 
 
 @router.post("/product")

@@ -192,12 +192,8 @@ def _parse_bsr_text(rank_text: str) -> dict:
 
 # ── First Page Scraper ───────────────────────────────────────────────────────
 
-async def scrape_first_page_http(keyword: str) -> dict:
-    """Scrape Amazon search results page using raw HTTP. Returns ASINs list."""
+async def _scrape_first_page_once(keyword: str) -> dict:
     url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
-
-    await asyncio.sleep(random.uniform(0.2, 1.2))
-
     t0 = time.monotonic()
     proxy_used = _get_proxy() is not None
     async with _make_client() as client:
@@ -222,7 +218,6 @@ async def scrape_first_page_http(keyword: str) -> dict:
 
     soup = BeautifulSoup(html, "lxml")
 
-    # Extract ASINs
     seen: set[str] = set()
     products: list[dict] = []
     for el in soup.select("[data-asin]"):
@@ -231,15 +226,12 @@ async def scrape_first_page_http(keyword: str) -> dict:
             seen.add(asin)
             products.append({"asin": asin})
 
-    # Extract suggestions from page (autocomplete data is sometimes embedded)
     suggestions: list[str] = []
-    # Try embedded suggestion data
     for m in re.findall(r'"alias":"aps","prefix":"[^"]*","suffix":"([^"]*)"', html):
         if m and keyword.lower() in m.lower():
             suggestions.append(m)
     suggestions = suggestions[:10]
 
-    logger.info(f"[HTTP-FP] '{keyword}' → {len(products)} ASINs, {len(suggestions)} suggestions ({duration}s)")
     return {
         "keyword": keyword,
         "products": products,
@@ -252,15 +244,31 @@ async def scrape_first_page_http(keyword: str) -> dict:
     }
 
 
+async def scrape_first_page_http(keyword: str, max_retries: int = 3) -> dict:
+    """Scrape Amazon search results page using raw HTTP. Retries up to max_retries times on CAPTCHA/error."""
+    last_result: dict = {}
+    for attempt in range(1, max_retries + 1):
+        await asyncio.sleep(random.uniform(0.2, 1.2))
+        result = await _scrape_first_page_once(keyword)
+        if not result.get("error"):
+            if attempt > 1:
+                logger.info(f"[HTTP-FP] '{keyword}' succeeded on attempt {attempt}")
+            else:
+                logger.info(f"[HTTP-FP] '{keyword}' → {result['count']} ASINs ({result['duration_s']}s)")
+            return result
+        last_result = result
+        if attempt < max_retries:
+            delay = random.uniform(1.0, 3.0)
+            logger.info(f"[HTTP-FP] '{keyword}' attempt {attempt}/{max_retries} failed ({result.get('error')}), retrying in {delay:.1f}s")
+            await asyncio.sleep(delay)
+    logger.warning(f"[HTTP-FP] '{keyword}' all {max_retries} attempts failed ({last_result.get('error')})")
+    return last_result
+
+
 # ── Product Scraper ──────────────────────────────────────────────────────────
 
-async def scrape_product_http(asin: str) -> dict:
-    """Scrape Amazon product detail page using raw HTTP. Returns product data dict."""
+async def _scrape_product_once(asin: str) -> dict:
     url = f"https://www.amazon.com/dp/{asin}?language=en_US"
-
-    # Jitter: randomise request timing to avoid simultaneous hits on the same IP
-    await asyncio.sleep(random.uniform(0.3, 1.5))
-
     t0 = time.monotonic()
     proxy_used = _get_proxy() is not None
 
@@ -292,7 +300,6 @@ async def scrape_product_http(asin: str) -> dict:
     manufacturer = _extract_manufacturer(info_box)
     rank_data = _extract_rank_data(info_box, html)
 
-    # Breadcrumb fallback for categories
     if not rank_data.get("main_category") or not rank_data.get("second_category"):
         bc_main, bc_second = _extract_breadcrumbs(soup)
         rank_data["main_category"] = rank_data.get("main_category") or bc_main
@@ -320,6 +327,25 @@ async def scrape_product_http(asin: str) -> dict:
         "http_status": resp.status_code,
         "proxy": proxy_used,
     }
+
+
+async def scrape_product_http(asin: str, max_retries: int = 3) -> dict:
+    """Scrape Amazon product detail page using raw HTTP. Retries up to max_retries times on CAPTCHA/error (not on out_of_stock)."""
+    last_result: dict = {}
+    for attempt in range(1, max_retries + 1):
+        await asyncio.sleep(random.uniform(0.3, 1.5))
+        result = await _scrape_product_once(asin)
+        err = result.get("error", "")
+        # Don't retry out-of-stock or product-not-found — those are definitive
+        if not err or err == "out_of_stock_or_no_page":
+            return result
+        last_result = result
+        if attempt < max_retries:
+            delay = random.uniform(1.0, 3.0)
+            logger.info(f"[HTTP-P] {asin} attempt {attempt}/{max_retries} failed ({err}), retrying in {delay:.1f}s")
+            await asyncio.sleep(delay)
+    logger.warning(f"[HTTP-P] {asin} all {max_retries} attempts failed ({last_result.get('error')})")
+    return last_result
 
 
 # ── Product field extractors ─────────────────────────────────────────────────
