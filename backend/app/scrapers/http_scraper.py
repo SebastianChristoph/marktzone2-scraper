@@ -1,7 +1,7 @@
 """
 Raw HTTP scrapers — no Playwright, no browser.
-Uses httpx (async) + BeautifulSoup for HTML parsing.
-Supports optional datacenter proxy rotation via DC_PROXY_LIST env var.
+Uses curl_cffi (Chrome TLS fingerprint) + BeautifulSoup for HTML parsing.
+Supports optional datacenter proxy rotation via WEBSHARE_PROXY_DOWNLOAD_URL / DC_PROXY_LIST env vars.
 Drop-in replacement for first_page_scraper.py and product_scraper.py.
 """
 import asyncio
@@ -12,31 +12,15 @@ import re
 import time
 from typing import Optional
 
-import httpx
+from curl_cffi.requests import AsyncSession
 from bs4 import BeautifulSoup, Tag
 
 logger = logging.getLogger(__name__)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
-]
-
-_DEFAULT_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Upgrade-Insecure-Requests": "1",
-    "sec-ch-ua-platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "DNT": "1",
-}
+# curl_cffi impersonates a real browser TLS fingerprint — no manual UA/header spoofing needed.
+# We only force Accept-Language so Amazon returns English pages.
+_IMPERSONATE = "chrome124"
+_LANG_HEADER = {"Accept-Language": "en-US,en;q=0.9"}
 
 # ── Proxy Pool ───────────────────────────────────────────────────────────────
 #
@@ -100,20 +84,15 @@ def _get_proxy() -> Optional[str]:
     return random.choice(_proxy_pool)
 
 
-def _make_client(timeout: float = 30.0) -> httpx.AsyncClient:
-    """Create an httpx client with optional proxy."""
+def _make_session(timeout: float = 30.0) -> AsyncSession:
+    """Create a curl_cffi AsyncSession with browser impersonation and optional proxy."""
     proxy = _get_proxy()
-    return httpx.AsyncClient(
-        follow_redirects=True,
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    return AsyncSession(
+        impersonate=_IMPERSONATE,
+        proxies=proxies,
         timeout=timeout,
-        proxy=proxy,
     )
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _make_headers() -> dict:
-    return {**_DEFAULT_HEADERS, "User-Agent": random.choice(USER_AGENTS)}
 
 
 def _text(el: Optional[Tag]) -> Optional[str]:
@@ -195,9 +174,9 @@ def _parse_bsr_text(rank_text: str) -> dict:
 async def _scrape_first_page_once(keyword: str) -> dict:
     url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
     t0 = time.monotonic()
-    proxy_used = _get_proxy() is not None
-    async with _make_client() as client:
-        resp = await client.get(url, headers=_make_headers())
+    async with _make_session() as session:
+        proxy_used = session.proxies is not None
+        resp = await session.get(url, headers=_LANG_HEADER)
 
     duration = round(time.monotonic() - t0, 2)
     html = resp.text
@@ -270,10 +249,9 @@ async def scrape_first_page_http(keyword: str, max_retries: int = 3) -> dict:
 async def _scrape_product_once(asin: str) -> dict:
     url = f"https://www.amazon.com/dp/{asin}?language=en_US"
     t0 = time.monotonic()
-    proxy_used = _get_proxy() is not None
-
-    async with _make_client() as client:
-        resp = await client.get(url, headers=_make_headers())
+    async with _make_session() as session:
+        proxy_used = session.proxies is not None
+        resp = await session.get(url, headers=_LANG_HEADER)
 
     duration = round(time.monotonic() - t0, 2)
     html = resp.text
