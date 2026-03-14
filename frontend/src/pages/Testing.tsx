@@ -189,13 +189,24 @@ export default function Testing() {
     if (!fpKeyword.trim()) return;
     setFpLoading(true); setFpResult(null); setFpError(null); setFpDuration(null);
     const t0 = Date.now();
+    const maxRetries = 5;
+    let lastData: unknown = null;
     try {
-      const res = await fetch("/api/scraper/first-page", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: fpKeyword.trim() }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setFpResult(await res.json());
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const res = await fetch("/api/scraper/first-page", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: fpKeyword.trim() }),
+        });
+        if (!res.ok) {
+          if (attempt < maxRetries) { await new Promise(r => setTimeout(r, 800 + Math.random() * 1200)); continue; }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        lastData = data;
+        if (!data.error) { setFpResult(data); return; }
+        if (attempt < maxRetries) await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+      }
+      setFpResult(lastData);
     } catch (e) { setFpError(e instanceof Error ? e.message : "Unknown error"); }
     finally { setFpDuration((Date.now() - t0) / 1000); setFpLoading(false); }
   }
@@ -211,13 +222,25 @@ export default function Testing() {
     if (!prodAsin.trim()) return;
     setProdLoading(true); setProdResult(null); setProdError(null); setProdDuration(null);
     const t0 = Date.now();
+    const maxRetries = 5;
+    let lastData: unknown = null;
     try {
-      const res = await fetch("/api/scraper/product", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asin: prodAsin.trim() }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setProdResult(await res.json());
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const res = await fetch("/api/scraper/product", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ asin: prodAsin.trim() }),
+        });
+        if (!res.ok) {
+          if (attempt < maxRetries) { await new Promise(r => setTimeout(r, 800 + Math.random() * 1200)); continue; }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        lastData = data;
+        // out_of_stock is a definitive result — don't retry
+        if (!data.error || data.error === "out_of_stock_or_no_page") { setProdResult(data); return; }
+        if (attempt < maxRetries) await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+      }
+      setProdResult(lastData);
     } catch (e) { setProdError(e instanceof Error ? e.message : "Unknown error"); }
     finally { setProdDuration((Date.now() - t0) / 1000); setProdLoading(false); }
   }
