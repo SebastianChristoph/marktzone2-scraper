@@ -10,8 +10,7 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.scrapers.product_scraper import ProductScraper
-from app.scrapers.first_page_scraper import FirstPageScraper
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
 
 router = APIRouter(prefix="/debug", tags=["debug"])
 
@@ -32,49 +31,39 @@ class FixRequest(BaseModel):
 
 
 def _build_prompt(req: FixRequest) -> str:
-    screenshot_note = (
-        f"A screenshot was captured at the time of failure: "
-        f"backend/screenshots/{req.screenshot_file} — read it as an image to see what the page looked like."
-        if req.screenshot_file else
-        "No screenshot was captured for this error."
-    )
-
     retry_note = ""
     if req.fix_attempts > 1:
         retry_note = f"""
 IMPORTANT — PREVIOUS FIX ATTEMPT FAILED:
 This is fix attempt #{req.fix_attempts}. A previous fix was applied but a retry scrape
-confirmed the problem still exists. The previous approach did not work.
-Please look more carefully, try a completely different selector strategy,
-or check if the price is rendered via JavaScript after page load (may need wait_for_selector).
+confirmed the problem still exists. Please try a completely different selector strategy
+or check if the field is rendered differently in the raw HTML.
 """
 
-    scraper_file = "first_page_scraper.py" if req.scraper_type == "first_page" else "product_scraper.py"
+    scraper_file = "http_scraper.py"
     method_hint = {
-        "no_price":    "_get_price()",
-        "no_title":    "_get_title()",
-        "no_products": "_extract_products_sync()",
+        "no_price":    "_extract_price()",
+        "no_title":    "_extract_title()",
+        "no_products": "scrape_first_page_http() product extraction",
         "out_of_stock": "_is_out_of_stock() — the detection might be a false positive",
         "captcha":     "_is_captcha() — the detection might be a false positive",
         "scrape_failed": "the general scrape flow",
     }.get(req.error_type, f"the logic related to '{req.error_type}'")
 
-    return f"""Fix the Amazon scraper for a '{req.error_type}' failure.
+    return f"""Fix the Amazon HTTP scraper for a '{req.error_type}' failure.
 {retry_note}
 CONTEXT (ASIN or keyword): {req.context}
 SCRAPER TYPE: {req.scraper_type}
 URL: {req.url or 'unknown'}
 ERROR TYPE: {req.error_type}
 ERROR MESSAGE: {req.error_message or 'none'}
-{screenshot_note}
 
 YOUR TASK:
 1. Read backend/app/scrapers/{scraper_file} — focus on {method_hint}.
-2. Use Playwright via Bash to fetch the live page and inspect the HTML:
-   python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().__enter__(); b=p.chromium.launch(headless=True); ctx=b.new_context(locale='en-US'); page=ctx.new_page(); page.goto('{req.url or ''}', wait_until='domcontentloaded'); import time; time.sleep(2); print(page.content()[:8000]); b.close()"
-3. If the screenshot file exists, read it as an image to see the page at failure time.
-4. Find the correct CSS selector or extraction logic.
-5. Edit backend/app/scrapers/{scraper_file} to fix the issue.
+2. Use httpx or requests to fetch the live page and inspect the HTML:
+   python -c "import httpx; r=httpx.get('{req.url or ''}', follow_redirects=True, timeout=30); print(r.text[:8000])"
+3. Find the correct CSS selector or extraction logic for BeautifulSoup.
+4. Edit backend/app/scrapers/{scraper_file} to fix the issue.
 
 Working directory is already set to the scraper root. All paths are relative to it.
 """
@@ -126,7 +115,6 @@ class RetryResponse(BaseModel):
 
 
 def _field_found(result: dict, error_type: str) -> bool:
-    """Check whether the field that was missing is now present in the scrape result."""
     if "error" in result:
         return False
     if error_type == "no_price":
@@ -135,7 +123,6 @@ def _field_found(result: dict, error_type: str) -> bool:
         return result.get("title") is not None
     if error_type in ("out_of_stock", "captcha"):
         return "error" not in result
-    # scrape_failed, general: if we got a result without error, it's fixed
     return True
 
 
@@ -143,8 +130,7 @@ def _field_found(result: dict, error_type: str) -> bool:
 async def retry_scrape(req: RetryRequest) -> RetryResponse:
     try:
         if req.scraper_type == "first_page":
-            scraper = FirstPageScraper(headless=True)
-            raw = await scraper.scrape(req.context)
+            raw = await scrape_first_page_http(req.context)
             products = raw.get("products", [])
             found = len(products) > 0
             return RetryResponse(
@@ -153,13 +139,10 @@ async def retry_scrape(req: RetryRequest) -> RetryResponse:
                 result={"count": len(products), "products": products[:3], "suggestions": raw.get("suggestions", [])},
             )
         else:
-            scraper = ProductScraper(headless=True)
-            result = await scraper.scrape(req.context)
+            result = await scrape_product_http(req.context)
             if result is None:
                 return RetryResponse(success=False, field_found=False, error="scrape returned None")
             found = _field_found(result, req.error_type)
-            # Trim variants list to keep response small
-            trimmed = {k: v for k, v in result.items() if k != "variants"}
-            return RetryResponse(success=True, field_found=found, result=trimmed)
+            return RetryResponse(success=True, field_found=found, result=result)
     except Exception as e:
         return RetryResponse(success=False, field_found=False, error=str(e))

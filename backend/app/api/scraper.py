@@ -1,20 +1,13 @@
-import asyncio
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.scrapers.first_page_scraper import FirstPageScraper
-from app.scrapers.product_scraper import ProductScraper
-from app.db.paths import SCREENSHOTS_DIR
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
 
 router = APIRouter(prefix="/scraper", tags=["scraper"])
 
 
 class FirstPageRequest(BaseModel):
     keyword: str
-    headless: bool = True
-    test_screenshot: bool = False
-    country: str | None = None  # "us" | "de" | "fr" — Webshare country targeting
 
 
 class ScrapedProduct(BaseModel):
@@ -26,54 +19,27 @@ class FirstPageResponse(BaseModel):
     count: int
     products: list[ScrapedProduct]
     suggestions: list[str]
-    test_screenshot: str | None = None
-    debug: dict | None = None
 
 
 class ProductRequest(BaseModel):
     asin: str
-    headless: bool = True
-    test_screenshot: bool = False
-    use_proxy: bool | None = None  # None = normal retry logic; True/False = forced single attempt
 
 
 @router.post("/first-page", response_model=FirstPageResponse)
 async def scrape_first_page(request: FirstPageRequest) -> FirstPageResponse:
-    scraper = FirstPageScraper(headless=request.headless)
-    result = await scraper.scrape(request.keyword, test_screenshot=request.test_screenshot, country=request.country)
+    result = await scrape_first_page_http(request.keyword)
     products = result.get("products", [])
     return FirstPageResponse(
         keyword=request.keyword,
         count=len(products),
         products=[ScrapedProduct(**p) for p in products],
         suggestions=result.get("suggestions", []),
-        test_screenshot=result.get("test_screenshot"),
-        debug=result.get("_debug"),
     )
 
 
 @router.post("/product")
 async def scrape_product(request: ProductRequest):
-    scraper = ProductScraper(headless=request.headless)
-    if request.use_proxy is not None:
-        result = await asyncio.to_thread(
-            scraper._scrape_once_sync,
-            request.asin, None, 1, request.test_screenshot, request.use_proxy,
-        )
-    else:
-        result = await scraper.scrape(request.asin, test_screenshot=request.test_screenshot)
+    result = await scrape_product_http(request.asin)
     if result is None:
         return {"asin": request.asin, "error": "scrape_failed"}
     return result
-
-
-@router.delete("/test-screenshots")
-async def delete_test_screenshots() -> dict:
-    deleted = 0
-    for f in SCREENSHOTS_DIR.glob("test_*.png"):
-        try:
-            f.unlink()
-            deleted += 1
-        except Exception:
-            pass
-    return {"deleted": deleted}

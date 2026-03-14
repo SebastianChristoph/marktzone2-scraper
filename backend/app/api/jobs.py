@@ -7,8 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.scrapers.first_page_scraper import FirstPageScraper
-from app.scrapers.product_scraper import ProductScraper
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
 from app.db.job_store import save_job, load_all_jobs, delete_job, delete_completed_jobs
 from app.api.security import require_scraper_secret
 
@@ -23,8 +22,8 @@ def _init_jobs_from_db() -> None:
     for job in load_all_jobs():
         _jobs[job["job_id"]] = job
 
-# At most 4 concurrent Playwright browser instances across all jobs and phases
-_BROWSER_SEM = asyncio.Semaphore(4)
+# Limit concurrent HTTP requests across all jobs and phases
+_HTTP_SEM = asyncio.Semaphore(20)
 
 
 class CreateJobRequest(BaseModel):
@@ -92,16 +91,15 @@ def _get_or_404(job_id: str) -> dict:
 
 
 async def _scrape_first_page(job: dict, market_name: str) -> dict:
-    """Phase 1: real first-page scraping. market_name is used as the Amazon keyword."""
+    """Phase 1: first-page scraping via raw HTTP. market_name is used as the Amazon keyword."""
     logger.info(f"[Job {job['job_id'][:8]}] Phase 1 — scraping first page for: {market_name}")
-    try:
-        async with _BROWSER_SEM:
-            scraper = FirstPageScraper(headless=True)
-            raw = await scraper.scrape(market_name)
-    except Exception as e:
-        raise RuntimeError(f"First-page scraping failed for '{market_name}': {e}") from e
+    async with _HTTP_SEM:
+        raw = await scrape_first_page_http(market_name)
 
     job["progress"]["done"] += 1
+
+    if raw.get("error"):
+        raise RuntimeError(f"First-page scraping failed for '{market_name}': {raw['error']}")
 
     products = raw.get("products", [])
     suggestions = raw.get("suggestions", [])
@@ -118,10 +116,9 @@ async def _scrape_first_page(job: dict, market_name: str) -> dict:
 
 
 async def _scrape_one_product(asin: str) -> dict | None:
-    """Scrape a single product page, throttled by the global semaphore."""
-    async with _BROWSER_SEM:
-        scraper = ProductScraper(headless=True)
-        return await scraper.scrape(asin)
+    """Scrape a single product page via raw HTTP, throttled by the global semaphore."""
+    async with _HTTP_SEM:
+        return await scrape_product_http(asin)
 
 
 async def _scrape_asin_details(job: dict, market_name: str, asins: list[dict]) -> dict:

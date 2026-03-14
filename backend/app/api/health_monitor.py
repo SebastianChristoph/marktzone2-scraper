@@ -14,9 +14,7 @@ import requests as req
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.scrapers.first_page_scraper import FirstPageScraper
-from app.scrapers.product_scraper import ProductScraper
-from app.scrapers.proxy_manager import get_proxy
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
 from app.db.health_store import get_config, set_config, save_check, get_latest_check, get_history
 
 router = APIRouter(prefix="/health-monitor", tags=["health-monitor"])
@@ -25,8 +23,6 @@ logger = logging.getLogger(__name__)
 _CHECK_INTERVAL_S = 12 * 3600  # 2x per day
 _PRODUCT_REQUIRED_FIELDS = ["title", "price", "ratings", "avg_rating"]
 _MIN_FIRST_PAGE_ASINS = 5
-
-_SEM = asyncio.Semaphore(2)  # health checks don't need full 4 slots
 _PROXY_TIMEOUT = 15
 
 
@@ -118,13 +114,14 @@ async def _check_keyword(keyword: str) -> dict:
     t0 = time.monotonic()
     result = {"keyword": keyword, "ok": False, "asin_count": 0, "duration_s": 0.0, "error": None}
     try:
-        async with _SEM:
-            scraper = FirstPageScraper(headless=True)
-            raw = await scraper.scrape(keyword)
-        asins = [p["asin"] for p in raw.get("products", [])]
-        result["asin_count"] = len(asins)
-        result["ok"] = len(asins) >= _MIN_FIRST_PAGE_ASINS
-        result["asins"] = asins[:10]
+        raw = await scrape_first_page_http(keyword)
+        if raw.get("error"):
+            result["error"] = raw["error"]
+        else:
+            asins = [p["asin"] for p in raw.get("products", [])]
+            result["asin_count"] = len(asins)
+            result["ok"] = len(asins) >= _MIN_FIRST_PAGE_ASINS
+            result["asins"] = asins[:10]
     except Exception as e:
         result["error"] = str(e)
     result["duration_s"] = round(time.monotonic() - t0, 2)
@@ -135,14 +132,15 @@ async def _check_asin(asin: str) -> dict:
     t0 = time.monotonic()
     result = {"asin": asin, "ok": False, "missing_fields": [], "duration_s": 0.0, "error": None, "data": {}}
     try:
-        async with _SEM:
-            scraper = ProductScraper(headless=True)
-            raw = await scraper.scrape(asin)
+        raw = await scrape_product_http(asin)
         if raw:
-            missing = [f for f in _PRODUCT_REQUIRED_FIELDS if raw.get(f) is None]
-            result["missing_fields"] = missing
-            result["ok"] = len(missing) == 0
-            result["data"] = {f: raw.get(f) for f in _PRODUCT_REQUIRED_FIELDS}
+            if raw.get("error"):
+                result["error"] = raw["error"]
+            else:
+                missing = [f for f in _PRODUCT_REQUIRED_FIELDS if raw.get(f) is None]
+                result["missing_fields"] = missing
+                result["ok"] = len(missing) == 0
+                result["data"] = {f: raw.get(f) for f in _PRODUCT_REQUIRED_FIELDS}
         else:
             result["missing_fields"] = _PRODUCT_REQUIRED_FIELDS
             result["error"] = "no data returned"

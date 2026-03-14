@@ -9,9 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.scrapers.first_page_scraper import FirstPageScraper
-from app.scrapers.product_scraper import ProductScraper, DAILY_RETRY_BACKOFFS
-from app.scrapers.proxy_manager import check_proxy
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
 from app.api.security import require_scraper_secret
 from app.db.error_log import log_error
 from app.db.daily_store import (
@@ -24,8 +22,8 @@ from app.db.daily_store import (
 router = APIRouter(prefix="/daily", tags=["daily"])
 logger = logging.getLogger(__name__)
 
-# 1 concurrent Playwright instance — eliminates proxy session collisions entirely
-_BROWSER_SEM = asyncio.Semaphore(1)
+# Limit concurrent HTTP requests per batch
+_HTTP_SEM = asyncio.Semaphore(20)
 
 # ── Request / Response models ─────────────────────────────────────────────────
 
@@ -62,11 +60,12 @@ class LogEntryRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _scrape_market(keyword: str) -> tuple[str, list[str], list[str]]:
-    """Scrape first page for a single keyword. Returns (keyword, asins, suggestions)."""
+    """Scrape first page for a single keyword via raw HTTP. Returns (keyword, asins, suggestions)."""
     try:
-        async with _BROWSER_SEM:
-            scraper = FirstPageScraper(headless=True)
-            raw = await scraper.scrape(keyword)
+        async with _HTTP_SEM:
+            raw = await scrape_first_page_http(keyword)
+        if raw.get("error"):
+            raise RuntimeError(raw["error"])
         asins = [p["asin"] for p in raw.get("products", [])]
         suggestions = raw.get("suggestions", [])
         return keyword, asins, suggestions
@@ -83,19 +82,13 @@ async def _scrape_market(keyword: str) -> tuple[str, list[str], list[str]]:
 
 
 async def _scrape_product(asin: str) -> tuple[dict | None, str | None]:
-    """Scrape a single product page. Returns (result, error_type). error_type is None on success."""
-    import random
-    # Stagger: wait 1–5s before competing for the semaphore to avoid tunnel collisions
-    await asyncio.sleep(random.uniform(1.0, 5.0))
+    """Scrape a single product page via raw HTTP. Returns (result, error_type). error_type is None on success."""
     try:
-        async with _BROWSER_SEM:
-            scraper = ProductScraper(headless=True, retry_backoffs=DAILY_RETRY_BACKOFFS)
-            result = await scraper.scrape(asin)
+        async with _HTTP_SEM:
+            result = await scrape_product_http(asin)
         if result is None:
-            # product_scraper already logged scrape_failed
             return None, "scrape_failed"
         if "error" in result:
-            # product_scraper already logged the specific error
             return None, str(result["error"])
         return result, None
     except Exception as e:
@@ -112,14 +105,29 @@ async def _scrape_product(asin: str) -> tuple[dict | None, str | None]:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _check_dc_proxy_sync() -> bool:
+    """Quick check: verify DC proxy routes traffic. Returns True if proxy works."""
+    import os, requests as req_sync
+    dc_list = os.getenv("DC_PROXY_LIST", "").strip()
+    if not dc_list:
+        return True  # no proxy configured — direct requests, always OK
+    proxy_url = dc_list.split(",")[0].strip()
+    proxies = {"http": proxy_url, "https": proxy_url}
+    try:
+        direct = req_sync.get("http://api.ipify.org?format=json", timeout=10).json().get("ip")
+        via_proxy = req_sync.get("http://api.ipify.org?format=json", proxies=proxies, timeout=10).json().get("ip")
+        return via_proxy is not None and via_proxy != direct
+    except Exception:
+        return False
+
+
 @router.post("/session/start", dependencies=[Depends(require_scraper_secret)])
 async def start_daily_session() -> dict:
     """Start a new daily session. Returns 409 if one is already running."""
     try:
         session_id = start_session()
         logger.info(f"[Daily] Session started: {session_id}")
-        # #6: Proxy health check before committing to a full run
-        proxy_ok = await asyncio.to_thread(check_proxy)
+        proxy_ok = await asyncio.to_thread(_check_dc_proxy_sync)
         if proxy_ok:
             log_daily_event(session_id, "Daily Session gestartet — Proxy OK", phase="market_discovery")
         else:
