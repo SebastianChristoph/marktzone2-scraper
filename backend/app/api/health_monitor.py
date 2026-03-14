@@ -14,7 +14,7 @@ import requests as req
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http
+from app.scrapers.http_scraper import scrape_first_page_http, scrape_product_http, get_proxy_pool
 from app.db.health_store import get_config, set_config, save_check, get_latest_check, get_history
 
 router = APIRouter(prefix="/health-monitor", tags=["health-monitor"])
@@ -27,25 +27,14 @@ _PROXY_TIMEOUT = 15
 
 
 def _proxy_check_sync() -> dict:
-    """Quick proxy sanity check via requests (no Playwright). Returns ok + details.
-    Prefers DC_PROXY_LIST if set, falls back to WEBSHARE_PROXY_URL (residential)."""
-    import os, random as _random
-    dc_list = os.getenv("DC_PROXY_LIST", "").strip()
-    if dc_list:
-        dc_proxies_raw = [p.strip() for p in dc_list.split(",") if p.strip()]
-        proxy_url = _random.choice(dc_proxies_raw)
-        proxies = {"http": proxy_url, "https": proxy_url}
-        proxy_label = proxy_url.split("@")[-1] if "@" in proxy_url else proxy_url  # host:port only
-    else:
-        proxy = get_proxy()  # uses US by default (residential)
-        if not proxy:
-            return {"ok": False, "error": "No proxy configured (DC_PROXY_LIST and WEBSHARE_PROXY_URL both unset)", "exit_ip": None, "amazon_status": None}
-        server = proxy["server"]
-        scheme = server.split("://")[0]
-        host_port = server.split("://")[1]
-        proxy_url = f"{scheme}://{proxy['username']}:{proxy['password']}@{host_port}/"
-        proxies = {"http": proxy_url, "https": proxy_url}
-        proxy_label = proxy["username"]
+    """Quick proxy sanity check via requests. Picks a random proxy from the pool."""
+    import random as _random
+    pool = get_proxy_pool()
+    if not pool:
+        return {"ok": False, "error": "No proxies configured (WEBSHARE_API_KEY and DC_PROXY_LIST both unset)", "exit_ip": None, "amazon_status": None}
+    proxy_url = _random.choice(pool)
+    proxies = {"http": proxy_url, "https": proxy_url}
+    proxy_label = proxy_url.split("@")[-1] if "@" in proxy_url else proxy_url
 
     # Direct IP
     direct_ip = None

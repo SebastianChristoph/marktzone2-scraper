@@ -2,12 +2,12 @@
 DC proxy connectivity test endpoint.
 Tests the configured DC_PROXY_LIST proxies: IP routing + Amazon reachability.
 """
-import os
 import time
 import random
 import logging
 from fastapi import APIRouter
 import requests as req
+from app.scrapers.http_scraper import get_proxy_pool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/proxy-test", tags=["proxy-test"])
@@ -90,7 +90,7 @@ def _check_proxy(proxy_url: str, direct_ip: str | None) -> dict:
 
 @router.get("")
 async def run_proxy_test() -> dict:
-    dc_list_raw = os.getenv("DC_PROXY_LIST", "").strip()
+    all_proxies = get_proxy_pool()
 
     # Direct IP
     direct_ip: str | None = None
@@ -100,15 +100,14 @@ async def run_proxy_test() -> dict:
     except Exception as e:
         logger.warning(f"[ProxyTest] Direct IP failed: {e}")
 
-    if not dc_list_raw:
+    if not all_proxies:
         return {
             "proxy_configured": False,
             "direct_ip": direct_ip,
             "results": [],
-            "error": "DC_PROXY_LIST not set",
+            "error": "No proxies configured (WEBSHARE_API_KEY and DC_PROXY_LIST both unset)",
         }
 
-    all_proxies = [p.strip() for p in dc_list_raw.split(",") if p.strip()]
     # Sample up to 3 random proxies to check pool health
     sample = random.sample(all_proxies, min(3, len(all_proxies)))
 

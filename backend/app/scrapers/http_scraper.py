@@ -59,31 +59,40 @@ def _init_proxies() -> None:
         return
     _proxy_initialized = True
 
-    # Option 1: Explicit proxy list
+    # Option 1: Webshare API — auto-fetch all DC proxies
+    api_key = os.getenv("WEBSHARE_API_KEY", "").strip()
+    if api_key:
+        try:
+            import requests as _req
+            resp = _req.get(
+                "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=500",
+                headers={"Authorization": f"Token {api_key}"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            for p in resp.json().get("results", []):
+                if p.get("valid", True):
+                    url = f"http://{p['username']}:{p['password']}@{p['proxy_address']}:{p['port']}"
+                    _proxy_pool.append(url)
+            logger.info(f"[HTTP] Loaded {len(_proxy_pool)} DC proxies from Webshare API")
+            return
+        except Exception as e:
+            logger.warning(f"[HTTP] Webshare API fetch failed: {e} — falling back to DC_PROXY_LIST")
+
+    # Option 2: Explicit comma-separated list
     proxy_list = os.getenv("DC_PROXY_LIST", "").strip()
     if proxy_list:
         _proxy_pool = [p.strip() for p in proxy_list.split(",") if p.strip()]
         logger.info(f"[HTTP] Loaded {len(_proxy_pool)} DC proxies from DC_PROXY_LIST")
         return
 
-    # Option 2: Single rotating endpoint with session count
-    proxy_url = os.getenv("DC_PROXY_URL", "").strip()
-    if proxy_url:
-        sessions = int(os.getenv("DC_PROXY_SESSIONS", "10"))
-        from urllib.parse import urlparse
-        parsed = urlparse(proxy_url)
-        base_user = parsed.username or ""
-        for i in range(1, sessions + 1):
-            # Append session number to username: user-s1, user-s2, ...
-            session_url = proxy_url.replace(
-                f"{base_user}:{parsed.password}@",
-                f"{base_user}-s{i}:{parsed.password}@"
-            )
-            _proxy_pool.append(session_url)
-        logger.info(f"[HTTP] Generated {len(_proxy_pool)} proxy sessions from DC_PROXY_URL")
-        return
-
     logger.info("[HTTP] No DC proxy configured — requests go direct")
+
+
+def get_proxy_pool() -> list[str]:
+    """Return the full proxy pool (triggers init on first call)."""
+    _init_proxies()
+    return list(_proxy_pool)
 
 
 def _get_proxy() -> Optional[str]:
