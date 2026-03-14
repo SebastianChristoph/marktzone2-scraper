@@ -254,7 +254,11 @@ export default function Testing() {
     setClusterLoading(true); setClusterStatus(null); setClusterError(null);
     try {
       const res = await fetch("/api/jobs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Scraper-Secret": import.meta.env.VITE_SCRAPER_SECRET ?? "",
+        },
         body: JSON.stringify({ cluster_id: 1, markets, max_asins_per_market: 25 }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

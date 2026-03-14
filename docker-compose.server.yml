@@ -47,7 +47,10 @@ services:
       - scraper_net
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_SCRAPER_SECRET: ${SCRAPER_SECRET}
     restart: unless-stopped
     depends_on:
       - backend

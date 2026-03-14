@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY . .
+ARG VITE_SCRAPER_SECRET
+ENV VITE_SCRAPER_SECRET=$VITE_SCRAPER_SECRET
 RUN npm run build
 
 FROM nginx:alpine
