@@ -195,8 +195,10 @@ def _parse_bsr_text(rank_text: str) -> dict:
 async def scrape_first_page_http(keyword: str) -> dict:
     """Scrape Amazon search results page using raw HTTP. Returns ASINs list."""
     url = f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}"
-    t0 = time.monotonic()
 
+    await asyncio.sleep(random.uniform(0.2, 1.2))
+
+    t0 = time.monotonic()
     proxy_used = _get_proxy() is not None
     async with _make_client() as client:
         resp = await client.get(url, headers=_make_headers())
